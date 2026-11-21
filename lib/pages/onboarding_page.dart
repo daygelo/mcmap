@@ -7,11 +7,9 @@ class OnboardingPage extends StatefulWidget {
   const OnboardingPage({
     super.key,
     required this.email,
-    this.requireEmailConfirmation = true,
   });
 
   final String email;
-  final bool requireEmailConfirmation;
 
   @override
   State<OnboardingPage> createState() => _OnboardingPageState();
@@ -55,20 +53,13 @@ class _OnboardingPageState extends State<OnboardingPage> {
         data: {'full_name': _nameController.text.trim()},
       );
 
-      if (widget.requireEmailConfirmation && response.session == null) {
+      if (response.session == null) {
         if (mounted) {
           setState(() {
             _error = 'Account created. Check your McGill email to confirm it.';
           });
         }
         return;
-      }
-
-      if (response.session == null) {
-        await Supabase.instance.client.auth.signInWithPassword(
-          email: widget.email,
-          password: _passwordController.text,
-        );
       }
 
       if (mounted) {

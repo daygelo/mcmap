@@ -8,9 +8,7 @@ A Flutter app with McGill email/password authentication powered by Supabase.
 - The app first asks for the McGill email on a separate scene.
 - Existing accounts show a login password scene.
 - New addresses show an account-creation onboarding scene.
-- Supabase email confirmation settings determine whether the user can enter immediately or must confirm the address first.
-
-The login checkbox selects whether the app presents confirmation-required behavior for the new account flow. Supabase itself controls whether email confirmation is enforced in Authentication → Providers → Email: Enable email confirmations. Disabling that server setting allows new sign-ups to receive an immediate session.
+- Supabase email confirmation settings determine whether a newly created user can enter immediately or must confirm the address first.
 
 ## Supabase setup
 

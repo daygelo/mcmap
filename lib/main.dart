@@ -60,13 +60,9 @@ class McMapApp extends StatelessWidget {
         }
 
         if (settings.name == '/onboarding') {
-          final arguments = settings.arguments;
-          final email = arguments is Map<String, Object?>
-              ? arguments['email'] as String?
+          final email = settings.arguments is String
+              ? settings.arguments as String
               : null;
-          final requireEmailConfirmation = arguments is Map<String, Object?>
-              ? arguments['requireEmailConfirmation'] == true
-              : true;
           if (email == null || email.isEmpty) {
             return MaterialPageRoute<void>(
               builder: (_) => const LoginPage(),
@@ -74,10 +70,7 @@ class McMapApp extends StatelessWidget {
             );
           }
           return MaterialPageRoute<void>(
-            builder: (_) => OnboardingPage(
-              email: email,
-              requireEmailConfirmation: requireEmailConfirmation,
-            ),
+            builder: (_) => OnboardingPage(email: email),
             settings: settings,
           );
         }

@@ -32,7 +32,6 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  bool _requireEmailConfirmation = true;
 
   @override
   void dispose() {
@@ -57,13 +56,7 @@ class _LoginPageState extends State<LoginPage> {
       if (exists == true) {
         Navigator.of(context).pushNamed('/welcome-back', arguments: email);
       } else {
-        Navigator.of(context).pushNamed(
-          '/onboarding',
-          arguments: {
-            'email': email,
-            'requireEmailConfirmation': _requireEmailConfirmation,
-          },
-        );
+        Navigator.of(context).pushNamed('/onboarding', arguments: email);
       }
     } on PostgrestException catch (error) {
       if (mounted) {
@@ -153,22 +146,6 @@ class _LoginPageState extends State<LoginPage> {
                               }
                               return null;
                             },
-                          ),
-                          const SizedBox(height: 12),
-                          CheckboxListTile(
-                            key: const Key('email-confirmation-checkbox'),
-                            contentPadding: EdgeInsets.zero,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            value: _requireEmailConfirmation,
-                            onChanged: (value) {
-                              setState(() {
-                                _requireEmailConfirmation = value ?? true;
-                              });
-                            },
-                            title: const Text('Require email confirmation'),
-                            subtitle: const Text(
-                              'Disable this to allow account creation without a confirmation email.',
-                            ),
                           ),
                           const SizedBox(height: 12),
                           FilledButton.icon(

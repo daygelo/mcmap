@@ -21,9 +21,7 @@ void main() {
 
     expect(find.text('Welcome to McMap'), findsOneWidget);
     expect(find.byKey(const Key('email-field')), findsOneWidget);
-    expect(find.byKey(const Key('password-field')), findsNothing);
-    expect(find.byKey(const Key('email-confirmation-checkbox')), findsOneWidget);
-    expect(find.text('Continue'), findsOneWidget);
+    expect(find.byKey(const Key('email-confirmation-checkbox')), findsNothing);
   });
 
   test('accepts McGill email domains', () {

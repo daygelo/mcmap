@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/mcmap.iml" filepath="$PROJECT_DIR$/mcmap.iml" />
+      <module fileurl="file://$PROJECT_DIR$/android/mcmap_android.iml" filepath="$PROJECT_DIR$/android/mcmap_android.iml" />
     </modules>
   </component>
 </project>

@@ -8,6 +8,8 @@ import '../data/clubs.dart';
 import '../models/club_event.dart';
 import '../services/local_rsvps.dart';
 import 'club_picker_page.dart';
+import 'event_details_page.dart';
+import 'organization_page.dart';
 import 'student/club_discovery.dart';
 import 'student/club_profile.dart';
 import 'student/edit_profile_page.dart';
@@ -19,7 +21,9 @@ import 'student/settings_page.dart';
 import 'student/student_profile.dart';
 import '../social/mcgillian_widgets.dart';
 import '../social/social_graph.dart';
+import '../widgets/event_bits.dart';
 import '../widgets/froshie_tag.dart';
+import '../widgets/initials_avatar.dart';
 
 /// Quick filters under the search bar.
 enum _SearchScope {
@@ -86,10 +90,28 @@ class _HomePageState extends State<HomePage> {
   final _social = SocialGraph();
   final _homeScroll = ScrollController();
   final _homeSearch = TextEditingController();
+  final _searchFocus = FocusNode();
   String _query = '';
   _EventDiscovery _discovery = _EventDiscovery.all;
   _SearchScope _scope = _SearchScope.all;
   int _selectedIndex = 0;
+
+  /// Filter pills only show while you're searching, so the default home
+  /// screen stays a clean event feed.
+  bool get _showSearchFilters =>
+      _searchFocus.hasFocus || _query.isNotEmpty || _scope != _SearchScope.all;
+
+  void _onSearchFocusChanged() => setState(() {});
+
+  /// Clears the search and collapses the filter pills.
+  void _closeSearch() {
+    _homeSearch.clear();
+    _searchFocus.unfocus();
+    setState(() {
+      _query = '';
+      _scope = _SearchScope.all;
+    });
+  }
 
   void _changeClubState(VoidCallback update) {
     setState(update);
@@ -178,6 +200,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _searchFocus.addListener(_onSearchFocusChanged);
     _listenForPublications();
   }
 
@@ -218,6 +241,7 @@ class _HomePageState extends State<HomePage> {
     unawaited(_publications?.cancel());
     _homeScroll.dispose();
     _homeSearch.dispose();
+    _searchFocus.dispose();
     _clubRevision.dispose();
     _rsvpVisibility.dispose();
     _profileVisibility.dispose();
@@ -225,22 +249,25 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  void _openPage(BuildContext context, Widget page) {
+  /// [route] names the screen (e.g. `/events/:id`) for future deep links.
+  void _openPage(BuildContext context, Widget page, {String? route}) {
     FocusScope.of(context).unfocus();
     Navigator.of(context).push<void>(
       MaterialPageRoute(
+        settings: RouteSettings(name: route),
         builder: (_) => InheritedTheme.captureAll(context, page),
       ),
     );
   }
 
-  void _openLivePage(Widget Function() buildPage) {
+  void _openLivePage(Widget Function() buildPage, {String? route}) {
     _openPage(
       context,
       ValueListenableBuilder(
         valueListenable: _clubRevision,
         builder: (_, _, _) => buildPage(),
       ),
+      route: route,
     );
   }
 
@@ -332,23 +359,30 @@ class _HomePageState extends State<HomePage> {
     );
   });
 
+  /// Club avatar tap: catalog clubs get their full page; any other
+  /// organizer (faculty, committee...) gets the placeholder page.
+  void _openOrganizer(ClubEvent event) {
+    final club = clubsById[event.clubId];
+    if (club != null) return _openClub(club);
+    final id = OrganizationPage.idFor(event.club);
+    _openPage(
+      context,
+      OrganizationPage(id: id, name: event.club),
+      route: OrganizationPage.routeFor(id),
+    );
+  }
+
   void _openEvent(ClubEvent event) => _openLivePage(() {
     final current = _events[event.id] ?? event;
-    final description = current.description?.trim();
-    return Scaffold(
-      appBar: AppBar(title: const Text('Event details')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            _eventCard(current),
-            if (description != null && description.isNotEmpty)
-              Text(description),
-          ],
-        ),
-      ),
+    return EventDetailsPage(
+      event: current,
+      isGoing: _rsvps.visibilityFor(current.id) != null,
+      canRsvp: current.canRsvpAt(DateTime.now()),
+      recommended: current.isFrosh && _profile.isFroshie,
+      onRsvp: () => _toggleRsvp(current),
+      onOpenClub: current.club.isEmpty ? null : () => _openOrganizer(current),
     );
-  });
+  }, route: EventDetailsPage.routeFor(event.id));
 
   Widget _eventCard(
     ClubEvent event, {
@@ -368,10 +402,10 @@ class _HomePageState extends State<HomePage> {
       previewLabel: _query.isEmpty ? 'Next event' : 'Matching event',
       onRsvp: () => _toggleRsvp(event),
       showOrganizer: !insideClub,
-      onOpenDetails: insideClub ? () => _openEvent(event) : null,
-      onOpenClub: !insideClub && clubsById.containsKey(event.clubId)
-          ? () => _openClubById(event.clubId)
-          : null,
+      onOpenDetails: () => _openEvent(event),
+      onOpenClub: insideClub || event.club.isEmpty
+          ? null
+          : () => _openOrganizer(event),
     );
   }
 
@@ -430,6 +464,16 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 16),
                 SearchBar(
                   controller: _homeSearch,
+                  focusNode: _searchFocus,
+                  trailing: [
+                    if (_showSearchFilters)
+                      TextFieldTapRegion(
+                        child: TextButton(
+                          onPressed: _closeSearch,
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                  ],
                   hintText: 'Search events, clubs or McGillians',
                   leading: const Icon(Icons.search_rounded),
                   padding: const WidgetStatePropertyAll(
@@ -445,17 +489,31 @@ class _HomePageState extends State<HomePage> {
                     });
                   },
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final scope in _SearchScope.values)
-                      ChoiceChip(
-                        label: Text(scope.label),
-                        selected: scope == _scope,
-                        onSelected: (_) => setState(() => _scope = scope),
-                      ),
-                  ],
+                // Counts as part of the search field, so tapping a pill
+                // doesn't unfocus the search and hide the pills mid-tap.
+                TextFieldTapRegion(
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topLeft,
+                    child: _showSearchFilters
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Wrap(
+                              spacing: 8,
+                              children: [
+                                for (final scope in _SearchScope.values)
+                                  ChoiceChip(
+                                    label: Text(scope.label),
+                                    selected: scope == _scope,
+                                    onSelected: (_) =>
+                                        setState(() => _scope = scope),
+                                  ),
+                              ],
+                            ),
+                          )
+                        : const SizedBox(width: double.infinity),
+                  ),
                 ),
                 // Students only show up once you search (or pick the
                 // McGillians filter), so the default view stays an event feed.
@@ -712,6 +770,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+// Sample synopses stand in for the AI summarizer's output.
 const _sampleEvents = [
   ClubEvent(
     'sample-board-game-night',
@@ -719,6 +778,17 @@ const _sampleEvents = [
     'Board Games Club',
     'Tuesday · 6 PM',
     'University Centre',
+    description:
+        'Join the Board Games Club for our weekly open game night! We bring '
+        'over 60 games, from quick party games like Codenames and Just One to '
+        'longer strategy games like Catan, Wingspan and Terraforming Mars. '
+        'No experience needed: our volunteers will teach you the rules and '
+        'help you find a table. Snacks and drinks are provided, and you are '
+        'welcome to bring your own games too. Drop in any time between 6 and '
+        '10 PM, alone or with friends.',
+    synopsis:
+        'Weekly drop-in game night with 60+ games, from party games to '
+        'strategy. Beginners welcome; volunteers teach the rules.',
   ),
   ClubEvent(
     'sample-frosh-week-kickoff',
@@ -727,6 +797,17 @@ const _sampleEvents = [
     'Monday · 7 PM',
     'Lower Field',
     isFrosh: true,
+    description:
+        'Welcome to McGill! Frosh Week starts here. Meet your Frosh group '
+        'and leaders, pick up your Frosh kit and t-shirt, and get the full '
+        'schedule for the week. There will be music, food trucks, games on '
+        'the field and a short welcome from SSMU. The event is alcohol-free '
+        'and open to all first-year students, including U0s and U1s coming '
+        'from CEGEP. Bring your student ID to check in. In case of rain, the '
+        'kickoff moves to the SSMU Ballroom.',
+    synopsis:
+        'Kick off Frosh Week on Lower Field: meet your Frosh group, grab your '
+        'kit, and enjoy music, food trucks and games. Bring your student ID.',
   ),
   ClubEvent(
     'sample-photo-walk',
@@ -734,6 +815,16 @@ const _sampleEvents = [
     'Photography Club',
     'Thursday · 4 PM',
     'Arts Building',
+    description:
+        'Explore downtown campus and Mount Royal through a lens. We meet on '
+        'the steps of the Arts Building and walk up to the Kondiaronk '
+        'Belvedere for golden hour, stopping for shots along the way. Any '
+        'camera works, including your phone. Club members will share quick '
+        'tips on composition and light. The walk takes about two hours, so '
+        'wear comfortable shoes and dress for the weather.',
+    synopsis:
+        'A two-hour golden-hour walk from the Arts Building up Mount Royal. '
+        'Any camera works, phones included.',
   ),
   ClubEvent(
     'sample-coding-meetup',
@@ -741,9 +832,21 @@ const _sampleEvents = [
     'Computer Science Club',
     'Friday · 5 PM',
     'Trottier Building',
+    description:
+        'Bring a laptop and a project, or come find one. This casual meetup '
+        'is for students of every faculty who want to code together, ask '
+        'questions and get feedback. Upper-year mentors will be around to '
+        'help with assignments, personal projects and interview prep. We '
+        'will also have a short lightning-talk segment where anyone can '
+        'demo what they are building. Pizza at 6.',
+    synopsis:
+        'Casual co-working session with upper-year mentors for help on '
+        'projects and interview prep, plus lightning talks and pizza.',
   ),
 ];
 
+/// Feed card. Tapping the club avatar opens the club page; tapping anywhere
+/// else (except the buttons) opens the event details page.
 class _EventCard extends StatelessWidget {
   const _EventCard({
     required this.event,
@@ -779,87 +882,99 @@ class _EventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final club = feedEntry?.club;
+    final clubName = club?.name ?? event.club;
     final more = feedEntry?.additionalEvents ?? 0;
-    final localizations = MaterialLocalizations.of(context);
-    final start = event.startsAt?.toLocal();
-    final schedule = start == null
-        ? event.schedule
-        : '${localizations.formatFullDate(start)} · '
-              '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(start))}';
+    final schedule = formatEventSchedule(context, event);
+    final muted = text.bodySmall?.copyWith(color: McMapColors.slate);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (club != null) ...[
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const CircleAvatar(child: Icon(Icons.groups_outlined)),
-                title: Text(club.name, style: text.titleLarge),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onOpenClub,
-              ),
-              if (upcoming) Text(previewLabel, style: text.bodySmall),
-            ],
-            if (event.isFrosh) ...[
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpenDetails,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (showOrganizer && clubName.isNotEmpty) ...[
+                Row(
+                  children: [
+                    InitialsAvatar(
+                      name: clubName,
+                      onTap: onOpenClub,
+                      semanticLabel: 'Open $clubName page',
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            clubName,
+                            style: text.titleSmall,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (club != null && upcoming)
+                            Text(previewLabel, style: muted),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (event.isFrosh) ...[
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const FroshieTag(),
+                    if (recommended)
+                      Text('Recommended for you', style: text.bodySmall),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              Text(event.title, style: text.titleLarge),
+              const SizedBox(height: 4),
+              if (schedule.isNotEmpty) Text(schedule, style: muted),
+              if (event.location.isNotEmpty) Text(event.location, style: muted),
+              if (event.cancelled)
+                const Text('Cancelled')
+              else if (event.startsAt == null)
+                Text('Schedule unconfirmed', style: muted)
+              else if (!upcoming)
+                const Text('Past event'),
+              if (event.synopsis != null || event.description != null) ...[
+                const SizedBox(height: 10),
+                EventSynopsis(event: event),
+              ],
+              if (visibility case final audience?)
+                Text('Going · Demo visibility: ${audience.label}'),
+              if (more > 0) Text('$more more from this club', style: muted),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+                runSpacing: 4,
                 children: [
-                  const FroshieTag(),
-                  if (recommended)
-                    Text('Recommended for you', style: text.bodySmall),
+                  if (isGoing)
+                    OutlinedButton(
+                      onPressed: onRsvp,
+                      child: const Text('Cancel RSVP'),
+                    )
+                  else if (canRsvp)
+                    FilledButton(onPressed: onRsvp, child: const Text('RSVP')),
+                  if (club != null && onOpenClub != null)
+                    TextButton(
+                      onPressed: onOpenClub,
+                      child: const Text('View club events'),
+                    ),
                 ],
               ),
-              const SizedBox(height: 8),
             ],
-            Text(event.title, style: text.titleMedium),
-            if (club == null && showOrganizer && event.club.isNotEmpty)
-              if (onOpenClub == null)
-                Text(event.club, style: text.bodySmall)
-              else
-                TextButton(onPressed: onOpenClub, child: Text(event.club)),
-            const SizedBox(height: 4),
-            if (schedule.isNotEmpty) Text(schedule, style: text.bodySmall),
-            if (event.location.isNotEmpty)
-              Text(event.location, style: text.bodySmall),
-            if (event.cancelled)
-              const Text('Cancelled')
-            else if (start == null)
-              Text('Schedule unconfirmed', style: text.bodySmall)
-            else if (!upcoming)
-              const Text('Past event'),
-            if (visibility case final audience?)
-              Text('Going · Demo visibility: ${audience.label}'),
-            if (more > 0)
-              Text('$more more from this club', style: text.bodySmall),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                if (isGoing)
-                  OutlinedButton(
-                    onPressed: onRsvp,
-                    child: const Text('Cancel RSVP'),
-                  )
-                else if (canRsvp)
-                  FilledButton(onPressed: onRsvp, child: const Text('RSVP')),
-                if (club != null)
-                  TextButton(
-                    onPressed: onOpenClub,
-                    child: const Text('View club events'),
-                  ),
-                if (onOpenDetails != null)
-                  TextButton(
-                    onPressed: onOpenDetails,
-                    child: const Text('Event details'),
-                  ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );

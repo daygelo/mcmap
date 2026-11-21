@@ -16,6 +16,7 @@ import 'package:mcmap/pages/student/club_discovery.dart';
 import 'package:mcmap/pages/student/suggested_clubs.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
+import 'package:mcmap/widgets/initials_avatar.dart';
 import 'package:mcmap/widgets/profile_stats.dart';
 import 'package:mcmap/theme/app_theme.dart';
 
@@ -173,7 +174,11 @@ void main() {
       expect(action('Esports championship', 'RSVP'), findsOneWidget);
       expect(action('Last week workshop', 'RSVP'), findsNothing);
       expect(action('Called off scrimmage', 'RSVP'), findsNothing);
-      await _tap(tester, action('Esports championship', 'Event details'));
+      // Tapping the card body (not the avatar or RSVP) opens details.
+      await _tap(
+        tester,
+        action('Esports championship', 'Esports championship'),
+      );
       expect(find.text('Event details'), findsOneWidget);
       expect(find.text('Esports championship'), findsOneWidget);
       expect(find.text('Check in at the registration desk.'), findsOneWidget);
@@ -740,7 +745,14 @@ void main() {
     stream.add(_published('coding-2', _boardGamesId, 'Coding night'));
     await tester.pumpAndSettle();
     await _search(tester, 'coding workshop');
-    await _tapText(tester, _name(_esportsId));
+    // The club avatar on the card opens the club page.
+    await _tap(
+      tester,
+      find.descendant(
+        of: _eventCard('Coding workshop'),
+        matching: find.byType(InitialsAvatar),
+      ),
+    );
     await _tapText(tester, 'Follow');
     await _tap(
       tester,

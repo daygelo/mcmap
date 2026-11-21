@@ -363,6 +363,8 @@ void main() {
         find.text('Going · Demo visibility: Private').hitTestable(),
         findsOneWidget,
       );
+      await tester.ensureVisible(find.text('Going · Demo visibility: Public'));
+      await tester.pumpAndSettle();
       expect(
         find.text('Going · Demo visibility: Public').hitTestable(),
         findsOneWidget,
@@ -375,6 +377,16 @@ void main() {
       ]);
       await tester.pageBack();
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Your profile'),
+        -300,
+        scrollable: find
+            .ancestor(
+              of: find.text('Going · Demo visibility: Public'),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(find.text('Your profile').hitTestable(), findsOneWidget);
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -656,6 +668,10 @@ void main() {
     ) async {
       await pumpHome(tester);
 
+      // Pills are hidden until the search bar is focused.
+      expect(find.widgetWithText(ChoiceChip, 'McGillians'), findsNothing);
+      await tester.tap(find.byType(SearchBar));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'McGillians'));
       await tester.pumpAndSettle();
       expect(find.text('Suggested McGillians'), findsOneWidget);
@@ -716,6 +732,8 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
       );
+      await tester.tap(find.byType(SearchBar));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'McGillians'));
       await tester.pumpAndSettle();
       expect(find.byType(McGillianTile), findsWidgets);

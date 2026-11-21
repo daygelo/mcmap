@@ -1,0 +1,82 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../theme/app_theme.dart';
+import '../widgets/initials_avatar.dart';
+
+/// Placeholder Faculty / Club page (route `/organization/:id`), opened by
+/// tapping a club avatar on an event. Catalog clubs open the full
+/// ClubDetailPage instead; this covers organizers that aren't in the
+/// catalog yet (faculties, committees, ...).
+///
+/// TODO(organizations): replace the placeholder body with the real
+/// faculty/club data (about, links, upcoming events, follow button).
+class OrganizationPage extends StatelessWidget {
+  const OrganizationPage({super.key, required this.id, required this.name});
+
+  /// URL-safe id, e.g. `ssmu-frosh-committee`.
+  final String id;
+  final String name;
+
+  static String routeFor(String id) => '/organization/$id';
+
+  /// Stable id for an organizer that only has a display name.
+  static String idFor(String name) => name
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Faculty & Club')),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                Row(
+                  children: [
+                    InitialsAvatar(name: name, diameter: 72),
+                    const SizedBox(width: 16),
+                    Expanded(child: Text(name, style: text.headlineSmall)),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 36,
+                  ),
+                  decoration: BoxDecoration(
+                    color: McMapColors.surfaceMuted,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: McMapColors.borderStrong),
+                  ),
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.account_balance_outlined,
+                        size: 36,
+                        color: McMapColors.slate,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Coming soon — Faculty & Club details will be '
+                        'populated here',
+                        textAlign: TextAlign.center,
+                        style: text.titleMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

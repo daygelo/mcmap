@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/academics.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/froshie_tag.dart';
+import '../../widgets/initials_avatar.dart';
 import '../../widgets/profile_photo_picker.dart';
 import '../../widgets/profile_stats.dart';
 
@@ -66,13 +67,11 @@ class ProfileAvatar extends StatelessWidget {
       StudentProfile(avatarUrl: final url?) => NetworkImage(url),
       _ => null,
     };
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: McMapColors.redTint,
-      foregroundColor: McMapColors.burgundy,
-      foregroundImage: image,
-      onForegroundImageError: image == null ? null : (_, _) {},
-      child: Icon(Icons.person_outline, size: radius),
+    // No photo yet → initials on the McGill tint.
+    return InitialsAvatar(
+      name: profile.name,
+      diameter: radius * 2,
+      image: image,
     );
   }
 }

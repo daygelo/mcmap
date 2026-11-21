@@ -105,7 +105,7 @@ class McGillianAvatar extends StatelessWidget {
     return CircleAvatar(
       radius: radius,
       backgroundColor: McMapColors.redTint,
-      foregroundColor: McMapColors.burgundy,
+      foregroundColor: McMapColors.redStrong,
       child: Text(
         student.initials,
         style: TextStyle(

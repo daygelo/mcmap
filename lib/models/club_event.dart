@@ -11,6 +11,7 @@ class ClubEvent {
     this.publishedAt,
     this.startsAt,
     this.description,
+    this.synopsis,
     this.cancelled = false,
     this.supportsUnrestrictedRsvp = false,
   });
@@ -25,6 +26,11 @@ class ClubEvent {
   final DateTime? publishedAt;
   final DateTime? startsAt;
   final String? description;
+
+  /// 1–2 sentence AI-generated TL;DR of [description], shown on feed cards
+  /// with an "AI Summary" label. Generated server-side when the event is
+  /// published (TODO(ai): wire up the summarizer); null until then.
+  final String? synopsis;
   final bool cancelled;
 
   /// Set by the publication source only for in-app RSVPs with no external

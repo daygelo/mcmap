@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/backend/mcmap_backend.dart';
 import 'package:mcmap/data/academics.dart';
+import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/main.dart';
 import 'package:mcmap/models/club_event.dart';
 import 'package:mcmap/models/student_visibility.dart';
@@ -204,6 +205,15 @@ void main() {
         'Angela Morin',
       );
     });
+  });
+
+  test('every catalog club id is a valid groups.slug', () {
+    // Must match groups_slug_check, or supabase/seed.sql fails to load.
+    final slug = RegExp(r'^[a-z0-9%-]+$');
+    expect(
+      clubCatalog.where((c) => !slug.hasMatch(c.id)).map((c) => c.id),
+      isEmpty,
+    );
   });
 
   group('database value mapping', () {

@@ -21,6 +21,8 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      `mcgillians`, `groups`, `events`, `event_rsvps`, Row Level Security,
      the `search_mcgillians` function, and the `avatars` / `group-images`
      storage buckets. It also creates a profile row for any existing accounts.
+   - `supabase/migrations/20261121000200_allow_encoded_group_slugs.sql`:
+     lets group slugs contain `%` (one catalog ID keeps URL-encoded accents).
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs

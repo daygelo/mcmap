@@ -99,7 +99,7 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
     final degree = _degree;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Step 1 of 2')),
+      appBar: AppBar(title: const Text('Step 1 of 3')),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

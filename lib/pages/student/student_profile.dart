@@ -150,7 +150,7 @@ class ProfileHeader extends StatelessWidget {
   const ProfileHeader({
     super.key,
     required this.profile,
-    required this.onEdit,
+    this.onEdit,
     this.onPhotoChanged,
     this.mcgilliansCount,
     this.onMcGilliansTap,
@@ -159,7 +159,7 @@ class ProfileHeader extends StatelessWidget {
   });
 
   final StudentProfile profile;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
 
   /// Enables the "+" photo badge. Null shows a plain avatar.
   final ValueChanged<Uint8List?>? onPhotoChanged;
@@ -242,26 +242,28 @@ class ProfileHeader extends StatelessWidget {
                 ],
               ),
             ],
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
-                    style: McMapButtonStyles.neutral,
-                    onPressed: onEdit,
-                    child: const Text('Edit Profile'),
+            if (onEdit != null) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      style: McMapButtonStyles.neutral,
+                      onPressed: onEdit,
+                      child: const Text('Edit Profile'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    style: McMapButtonStyles.neutral,
-                    onPressed: () => _share(context),
-                    child: const Text('Share Profile'),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      style: McMapButtonStyles.neutral,
+                      onPressed: () => _share(context),
+                      child: const Text('Share Profile'),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

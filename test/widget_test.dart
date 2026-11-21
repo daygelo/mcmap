@@ -58,6 +58,21 @@ Future<void> _goToInterests(WidgetTester tester) async {
   expect(find.text('What are you into?'), findsOneWidget);
 }
 
+Future<void> _skipClubs(WidgetTester tester) async {
+  expect(find.text('Step 3 of 3'), findsOneWidget);
+  await tester.tap(find.text('Skip for now'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _revealFeed(WidgetTester tester, Finder finder) async {
+  await tester.scrollUntilVisible(
+    finder,
+    200,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('shows the McMap home page', (WidgetTester tester) async {
     await tester.pumpWidget(
@@ -66,8 +81,6 @@ void main() {
 
     expect(find.text('McMap'), findsOneWidget);
     expect(find.text('Find club events'), findsOneWidget);
-    expect(find.text('Club events'), findsOneWidget);
-    expect(find.text('Board Game Night'), findsOneWidget);
     final header = tester.element(find.text('McMap'));
     final appBar = tester.widget<AppBar>(find.byType(AppBar));
     final titleStyle = DefaultTextStyle.of(header).style;
@@ -77,6 +90,10 @@ void main() {
     expect(titleStyle.fontFamily, McMapFonts.serif);
     expect(titleStyle.fontSize, 26);
     expect(IconTheme.of(gear).color, McMapColors.white);
+    await _revealFeed(tester, find.text('Club events'));
+    expect(find.text('Club events'), findsOneWidget);
+    await _revealFeed(tester, find.text('Board Game Night'));
+    expect(find.text('Board Game Night'), findsOneWidget);
     final rsvp = tester.element(
       find.widgetWithText(FilledButton, 'RSVP').first,
     );
@@ -102,11 +119,18 @@ void main() {
     final search = find.byType(SearchBar);
     await tester.enterText(search, '  PHOTOGRAPHY  ');
     await tester.pumpAndSettle();
+    await _revealFeed(tester, find.text('Photo Walk'));
     expect(find.text('Photo Walk'), findsOneWidget);
     expect(find.text('Board Game Night'), findsNothing);
 
+    tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position
+        .jumpTo(0);
+    await tester.pumpAndSettle();
     await tester.enterText(search, 'no matching club');
     await tester.pumpAndSettle();
+    await _revealFeed(tester, find.text('No club events match your search.'));
     expect(find.text('No club events match your search.'), findsOneWidget);
   });
 
@@ -164,7 +188,15 @@ void main() {
       MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
     );
 
-    await tester.tap(find.text('RSVP').first);
+    await _revealFeed(tester, find.text('Board Game Night'));
+    final boardCard = find.ancestor(
+      of: find.text('Board Game Night'),
+      matching: find.byType(Card),
+    );
+    final rsvp = find.descendant(of: boardCard, matching: find.text('RSVP'));
+    await tester.ensureVisible(rsvp);
+    await tester.pumpAndSettle();
+    await tester.tap(rsvp);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
@@ -178,7 +210,16 @@ void main() {
       findsOneWidget,
       reason: 'sample profile is U0',
     );
-    expect(find.text('Board Game Night').hitTestable(), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Going · Demo visibility: Private'),
+      200,
+      scrollable: find.descendant(
+        of: find.byType(ListView).last,
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Board Game Night'), findsWidgets);
     await tester.ensureVisible(find.text('Cancel RSVP').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel RSVP').hitTestable());
@@ -277,7 +318,7 @@ void main() {
   testWidgets(
     'keeps privacy choices independent and preserves RSVP visibility',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1280, 950));
+      await tester.binding.setSurfaceSize(const Size(1280, 1150));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
@@ -356,6 +397,18 @@ void main() {
     expect(find.text('Skip for now'), findsNothing);
     await tester.tap(find.text('Continue · 3 selected'));
     await tester.pumpAndSettle();
+    expect(find.text('Step 3 of 3'), findsOneWidget);
+    for (final (query, club) in [
+      ('MESA', 'McGill Esports Student’s Association'),
+      ('Board Game', 'Mcgill Board Game Students’ Society'),
+    ]) {
+      await tester.enterText(find.byType(SearchBar), query);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(club));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
 
     expect(find.text('Software Engineering · Engineering'), findsOneWidget);
     expect(find.text('Coding').hitTestable(), findsOneWidget);
@@ -363,6 +416,12 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Coding').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('2 Club Memberships'));
+    await tester.pumpAndSettle();
+    expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
+    expect(find.text('Mcgill Board Game Students’ Society'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Edit Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Engineering'), findsOneWidget);
@@ -382,6 +441,7 @@ void main() {
 
     await tester.tap(find.text('Skip for now'));
     await tester.pumpAndSettle();
+    await _skipClubs(tester);
 
     expect(find.text('Software Engineering · Engineering'), findsOneWidget);
     expect(
@@ -391,6 +451,17 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Software Engineering · U2'), findsOneWidget);
+    await tester.tap(find.text('0 Club Memberships'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add Clubs'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(SearchBar), 'MESA');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('McGill Esports Student’s Association'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Clubs'));
+    await tester.pumpAndSettle();
+    expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
   });
 
   testWidgets('U-year only appears for undergraduates', (tester) async {
@@ -410,6 +481,33 @@ void main() {
     expect(find.text('Faculty'), findsOneWidget);
   });
 
+  testWidgets('graduate standing survives optional onboarding steps', (
+    tester,
+  ) async {
+    await _goToAcademicInfo(tester);
+    await tester.tap(find.text("Master's"));
+    await tester.pumpAndSettle();
+    expect(find.text('U0'), findsNothing);
+    await tester.tap(find.text('Engineering'));
+    await tester.pumpAndSettle();
+    await _pickMajor(tester, 'Software', 'Software Engineering');
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+    await _skipClubs(tester);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text("Software Engineering · Master's"), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ProfileHeader),
+        matching: find.byType(FroshieTag),
+      ),
+      findsNothing,
+    );
+  });
+
   testWidgets('U0 student can pick Undeclared', (tester) async {
     await _goToAcademicInfo(tester);
 
@@ -425,6 +523,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Skip for now'));
     await tester.pumpAndSettle();
+    await _skipClubs(tester);
 
     expect(
       find.text('Undeclared / Freshman Program · Science'),
@@ -446,6 +545,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Skip for now'));
     await tester.pumpAndSettle();
+    await _skipClubs(tester);
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(
@@ -477,6 +577,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Skip for now'));
     await tester.pumpAndSettle();
+    await _skipClubs(tester);
 
     expect(find.text('Recommended for you'), findsOneWidget);
     await tester.tap(find.text('Profile'));

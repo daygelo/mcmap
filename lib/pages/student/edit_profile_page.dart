@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/academics.dart';
 import '../../data/interests.dart';
+import '../../widgets/profile_photo_picker.dart';
 import 'student_profile.dart';
 
 const _faculties = [
@@ -12,7 +13,6 @@ const _faculties = [
   'Faculty of Education',
   'Other',
 ];
-const _years = ['U0', 'U1', 'U2', 'U3', 'U4'];
 const _interestOptions = [
   'Programming',
   'Gaming',
@@ -49,6 +49,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late final _interests = {...widget.profile.interests};
   late String _faculty = widget.profile.faculty;
   late String _year = widget.profile.year;
+
+  /// Photo shown in the preview; saved with everything else.
+  late StudentProfile _photo = widget.profile;
   bool _saving = false;
 
   @override
@@ -58,6 +61,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
     super.dispose();
   }
 
+  Future<void> _changePhoto() async {
+    final choice = await chooseProfilePhoto(context, hasPhoto: _photo.hasPhoto);
+    if (!mounted || choice == null) return;
+    setState(
+      () => _photo = _photo.withPhoto(switch (choice) {
+        PhotoPicked(:final bytes) => bytes,
+        PhotoRemoved() => null,
+      }),
+    );
+  }
+
   Future<void> _save() async {
     if (_saving || !_form.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
@@ -65,12 +79,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       await widget.onSave(
         StudentProfile(
+          name: widget.profile.name,
           faculty: _faculty,
           major: _major.text.trim(),
           year: _year,
+          firstYearAtMcGill: widget.profile.firstYearAtMcGill,
           bio: _bio.text.trim(),
           interests: Set.unmodifiable(_interests),
-          avatarUrl: widget.profile.avatarUrl,
+          avatarUrl: _photo.avatarUrl,
+          avatarBytes: _photo.avatarBytes,
         ),
       );
     } catch (_) {
@@ -99,18 +116,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 child: ListView(
                   padding: const EdgeInsets.all(20),
                   children: [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: ProfileAvatar(profile: widget.profile),
+                    Row(
+                      children: [
+                        ProfileAvatar(profile: _photo),
+                        const SizedBox(width: 16),
+                        OutlinedButton(
+                          onPressed: _saving ? null : _changePhoto,
+                          child: Text(
+                            _photo.hasPhoto ? 'Change picture' : 'Add picture',
+                          ),
+                        ),
+                      ],
                     ),
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton(
-                        onPressed: null,
-                        child: Text('Change picture'),
-                      ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Demo: your photo stays on this device until the app '
+                      'restarts.',
                     ),
-                    const Text('Picture changes require avatar storage.'),
                     const SizedBox(height: 20),
                     DropdownButtonFormField<String>(
                       isExpanded: true,
@@ -142,12 +164,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
+                      isExpanded: true,
                       initialValue: _year,
                       decoration: const InputDecoration(
-                        labelText: 'Academic year',
+                        labelText: 'Year / degree level',
                       ),
                       items: [
-                        for (final option in _years)
+                        for (final option in {
+                          ...academicStandings,
+                          widget.profile.year,
+                        })
                           DropdownMenuItem(value: option, child: Text(option)),
                       ],
                       onChanged: _saving

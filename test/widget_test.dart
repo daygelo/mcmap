@@ -5,9 +5,12 @@ import 'package:mcmap/main.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/theme/app_theme.dart';
 import 'package:mcmap/pages/student/settings_page.dart';
+import 'package:mcmap/pages/student/student_profile.dart';
+import 'package:mcmap/social/mcgillian_widgets.dart';
+import 'package:mcmap/widgets/profile_stats.dart';
+import 'package:mcmap/widgets/froshie_tag.dart';
 
-/// Login → pick Engineering / Software Engineering → land on interests.
-Future<void> _goToInterests(WidgetTester tester) async {
+Future<void> _goToAcademicInfo(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1200, 2400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -18,14 +21,39 @@ Future<void> _goToInterests(WidgetTester tester) async {
   await tester.tap(find.text('Continue with Microsoft'));
   await tester.pumpAndSettle();
   expect(find.text('What do you study?'), findsOneWidget);
+}
 
+FilledButton _continueButton(WidgetTester tester) =>
+    tester.widget(find.widgetWithText(FilledButton, 'Continue'));
+
+Future<void> _pickMajor(WidgetTester tester, String search, String pick) async {
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(DropdownMenu<String>),
+      matching: find.byType(TextField),
+    ),
+    search,
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(pick).last);
+  await tester.pumpAndSettle();
+}
+
+/// Login → Undergraduate / U2 / Engineering / Software Engineering → interests.
+Future<void> _goToInterests(WidgetTester tester) async {
+  await _goToAcademicInfo(tester);
+
+  await tester.tap(find.text('Undergraduate'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('U2'));
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Engineering'));
   await tester.pumpAndSettle();
-  await tester.tap(find.byType(DropdownButtonFormField<String>));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Software Engineering').last);
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Continue'));
+  expect(_continueButton(tester).onPressed, isNull);
+  await _pickMajor(tester, 'Software', 'Software Engineering');
+  expect(_continueButton(tester).onPressed, isNotNull);
+
+  await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
   await tester.pumpAndSettle();
   expect(find.text('What are you into?'), findsOneWidget);
 }
@@ -101,8 +129,14 @@ void main() {
       final scrollable = tester.state<ScrollableState>(
         find.descendant(of: feed, matching: find.byType(Scrollable)).first,
       );
-      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
-      await tester.pumpAndSettle();
+      // The lazy list only estimates its length until the last cards are
+      // built, so keep jumping to the end until the extent stops growing.
+      double? extent;
+      while (extent != scrollable.position.maxScrollExtent) {
+        extent = scrollable.position.maxScrollExtent;
+        scrollable.position.jumpTo(extent);
+        await tester.pumpAndSettle();
+      }
 
       for (final label in [
         'Explore campus',
@@ -136,6 +170,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Sample profile').hitTestable(), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ProfileHeader),
+        matching: find.byType(FroshieTag),
+      ),
+      findsOneWidget,
+      reason: 'sample profile is U0',
+    );
     expect(find.text('Board Game Night').hitTestable(), findsOneWidget);
     await tester.ensureVisible(find.text('Cancel RSVP').last);
     await tester.pumpAndSettle();
@@ -205,7 +247,14 @@ void main() {
     expect(find.text('Computer Science · U2'), findsOneWidget);
     expect(find.text('Faculty of Science'), findsOneWidget);
     expect(find.text('I like campus events.'), findsOneWidget);
-    expect(find.text('Froshie'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(ProfileHeader),
+        matching: find.byType(FroshieTag),
+      ),
+      findsNothing,
+      reason: 'no longer U0 after switching to U2',
+    );
     expect(find.text('Programming'), findsOneWidget);
 
     await tester.tap(find.text('Edit Profile'));
@@ -335,6 +384,298 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(find.text('Add interests later from Edit Profile.'), findsOneWidget);
+    expect(
+      find.textContaining('Showing events for U2 Engineering students'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Software Engineering · U2'), findsOneWidget);
+  });
+
+  testWidgets('U-year only appears for undergraduates', (tester) async {
+    await _goToAcademicInfo(tester);
+
+    expect(find.text('U0'), findsNothing);
+    expect(find.text('Faculty'), findsNothing);
+    await tester.tap(find.text('Undergraduate'));
+    await tester.pumpAndSettle();
+    expect(find.text('U0'), findsOneWidget);
+    expect(find.text('Faculty'), findsNothing, reason: 'year comes first');
+
+    await tester.tap(find.text('U1'));
+    await tester.tap(find.text("Master's"));
+    await tester.pumpAndSettle();
+    expect(find.text('U0'), findsNothing);
+    expect(find.text('Faculty'), findsOneWidget);
+  });
+
+  testWidgets('U0 student can pick Undeclared', (tester) async {
+    await _goToAcademicInfo(tester);
+
+    await tester.tap(find.text('Undergraduate'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('U0'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Science'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining("Haven't declared yet?"), findsOneWidget);
+    await _pickMajor(tester, 'Undecl', 'Undeclared / Freshman Program');
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Undeclared / Freshman Program · Science'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('exchange students can continue without a major', (tester) async {
+    await _goToAcademicInfo(tester);
+
+    await tester.tap(find.text('Exchange / Continuing Studies'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Arts'));
+    await tester.pumpAndSettle();
+    expect(find.text('Program / major (optional)'), findsOneWidget);
+    expect(_continueButton(tester).onPressed, isNotNull);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Program not specified · Exchange / Cont. Ed.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Edit Profile'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('U1 first-year follow-up makes you a Froshie', (tester) async {
+    await _goToAcademicInfo(tester);
+
+    await tester.tap(find.text('Undergraduate'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('U1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Is this your first year at McGill?'), findsOneWidget);
+    expect(find.text('Faculty'), findsNothing, reason: 'must answer first');
+
+    await tester.tap(find.text("Yes, it's my first year"));
+    await tester.pumpAndSettle();
+    expect(find.byType(FroshieTag), findsOneWidget);
+    await tester.tap(find.text('Arts'));
+    await tester.pumpAndSettle();
+    await _pickMajor(tester, 'Hist', 'History');
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Recommended for you'), findsOneWidget);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(ProfileHeader),
+        matching: find.byType(FroshieTag),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('returning U1 students are not Froshies', (tester) async {
+    await _goToAcademicInfo(tester);
+
+    await tester.tap(find.text('Undergraduate'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('U1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('No, returning student'));
+    await tester.pumpAndSettle();
+    expect(find.byType(FroshieTag), findsNothing);
+    expect(find.text('Faculty'), findsOneWidget);
+  });
+
+  group('McGillians', () {
+    int statCount(WidgetTester tester) => tester
+        .widget<ProfileStat>(find.widgetWithText(ProfileStat, 'McGillians'))
+        .value;
+
+    Future<void> pumpHome(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+      );
+    }
+
+    testWidgets('search finds students by major and adds them', (tester) async {
+      await pumpHome(tester);
+      expect(find.byType(McGillianTile), findsNothing);
+
+      await tester.enterText(find.byType(SearchBar), 'software');
+      await tester.pumpAndSettle();
+      final amir = find.widgetWithText(McGillianTile, 'Amir Haddad');
+      expect(amir, findsOneWidget);
+      expect(find.text('No club events match your search.'), findsOneWidget);
+
+      await tester.tap(
+        find.descendant(of: amir, matching: find.text('Add Friend')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: amir, matching: find.text('Following')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(find.byType(SearchBar), '@dan');
+      await tester.pumpAndSettle();
+      final dan = find.widgetWithText(McGillianTile, 'Daniel Okafor');
+      await tester.tap(
+        find.descendant(of: dan, matching: find.text('Add Friend')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: dan, matching: find.text('Requested')),
+        findsOneWidget,
+        reason: 'private profile',
+      );
+    });
+
+    testWidgets('filter tabs switch between events and students', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'McGillians'));
+      await tester.pumpAndSettle();
+      expect(find.text('Suggested McGillians'), findsOneWidget);
+      expect(find.text('Board Game Night'), findsNothing);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Events'));
+      await tester.enterText(find.byType(SearchBar), 'maya');
+      await tester.pumpAndSettle();
+      expect(find.byType(McGillianTile), findsNothing);
+    });
+
+    testWidgets('McGillians count opens a manageable list', (tester) async {
+      await pumpHome(tester);
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+
+      expect(statCount(tester), 3);
+      await tester.tap(find.widgetWithText(ProfileStat, 'McGillians'));
+      await tester.pumpAndSettle();
+      expect(find.text('3 McGillians'), findsOneWidget);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Search your McGillians'),
+        'leo',
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(McGillianTile), findsOneWidget);
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 McGillians'), findsOneWidget);
+    });
+
+    testWidgets('student profile shows count and friend state', (tester) async {
+      await pumpHome(tester);
+      await tester.enterText(find.byType(SearchBar), 'chlo');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chloé Gagnon'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('@chloe.g'), findsOneWidget);
+      expect(find.byType(FroshieTag), findsOneWidget, reason: 'U1 first-year');
+      expect(statCount(tester), 31);
+      await tester.tap(find.text('Add Friend'));
+      await tester.pumpAndSettle();
+      expect(statCount(tester), 32);
+
+      await tester.tap(find.text('Following'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
+      await tester.pumpAndSettle();
+      expect(find.text('Add Friend'), findsOneWidget);
+    });
+
+    testWidgets('student rows fit on a small phone', (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+      );
+      await tester.tap(find.widgetWithText(ChoiceChip, 'McGillians'));
+      await tester.pumpAndSettle();
+      expect(find.byType(McGillianTile), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('profile header puts avatar beside the stats', (tester) async {
+      await pumpHome(tester);
+      await tester.tap(find.text('RSVP').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+
+      int stat(String label) => tester
+          .widget<ProfileStat>(find.widgetWithText(ProfileStat, label))
+          .value;
+      expect(stat('Events'), 1);
+      expect(stat('Clubs'), 1);
+
+      final avatar = tester.getRect(find.byType(EditableProfileAvatar));
+      final mcgillians = tester.getRect(
+        find.widgetWithText(ProfileStat, 'McGillians'),
+      );
+      expect(mcgillians.left, greaterThan(avatar.right));
+      expect(mcgillians.center.dy, closeTo(avatar.center.dy, 2));
+      expect(find.text('Share Profile'), findsOneWidget);
+    });
+
+    testWidgets('tapping the avatar opens the photo options', (tester) async {
+      await pumpHome(tester);
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(EditableProfileAvatar));
+      await tester.pumpAndSettle();
+      expect(find.text('Choose from library'), findsOneWidget);
+      expect(
+        find.text('Remove current photo'),
+        findsNothing,
+        reason: 'no photo yet',
+      );
+    });
+
+    testWidgets('profile header fits on a small phone', (tester) async {
+      tester.view.physicalSize = const Size(320, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+      );
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byType(NavigationDestination).first);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(SearchBar), 'chlo');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chloé Gagnon'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
   });
 }

@@ -42,6 +42,12 @@ abstract final class McMapColors {
   static const border = Color(0xFFE4E5E9);
   static const borderStrong = Color(0xFFD9DCE1);
 
+  // Froshie tag (first-years / Frosh events): the one deliberate off-brand
+  // accent. Neon on obsidian is 13.9:1.
+  static const froshObsidian = Color(0xFF111114);
+  static const froshNeon = Color(0xFF39FF14);
+  static const froshGlow = Color(0x4039FF14); // 25% neon, static glow only
+
   // Status
   static const success = Color(0xFF1E7B4F);
   static const error = burgundy;
@@ -148,6 +154,26 @@ class McMapMapStyle extends ThemeExtension<McMapMapStyle> {
 
   @override
   McMapMapStyle lerp(ThemeExtension<McMapMapStyle>? other, double t) => this;
+}
+
+/// Button styles that sit outside the default (red) filled button.
+abstract final class McMapButtonStyles {
+  /// Instagram-style neutral grey button ("Edit Profile", "Share Profile"),
+  /// for actions on your own stuff where red would shout.
+  static final neutral = ButtonStyle(
+    shape: WidgetStatePropertyAll(
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+    minimumSize: const WidgetStatePropertyAll(Size.fromHeight(40)),
+    elevation: const WidgetStatePropertyAll(0),
+    foregroundColor: const WidgetStatePropertyAll(McMapColors.ink),
+    backgroundColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.pressed) || s.contains(WidgetState.hovered)
+          ? McMapColors.borderStrong
+          : McMapColors.surfaceMuted,
+    ),
+    overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+  );
 }
 
 ThemeData buildMcMapTheme() {

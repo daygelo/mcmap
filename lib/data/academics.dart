@@ -51,7 +51,7 @@ const Map<String, List<String>> majorsByFaculty = {
     'Urban Planning',
   ],
   'Law': ['BCL/JD'],
-  'Management': [
+  'Desautels Management': [
     'Accounting',
     'Finance',
     'Information Systems',
@@ -66,6 +66,12 @@ const Map<String, List<String>> majorsByFaculty = {
     'Physical Therapy',
   ],
   'Dental Medicine & Oral Health Sciences': ['Dental Medicine'],
+  'Continuing Studies': [
+    'Certificate Program',
+    'Diploma Program',
+    'Language & Intercultural Studies',
+    'Individual Courses',
+  ],
   'Music': [
     'Composition',
     'Jazz Performance',
@@ -90,3 +96,45 @@ const Map<String, List<String>> majorsByFaculty = {
     'Statistics',
   ],
 };
+
+/// Shown first in every faculty's major list, mainly for U0 students who
+/// haven't declared yet.
+const undeclaredMajor = 'Undeclared / Freshman Program';
+
+/// Degree levels offered at onboarding. Only undergraduates pick a U-year.
+enum DegreeLevel {
+  undergraduate('Undergraduate', 'Undergrad'),
+  masters("Master's", "Master's"),
+  doctorate('Doctorate (Ph.D.)', 'Ph.D.'),
+  professional('Professional / Law / Medicine', 'Professional'),
+  exchangeOrContinuing('Exchange / Continuing Studies', 'Exchange / Cont. Ed.');
+
+  const DegreeLevel(this.label, this.shortLabel);
+
+  final String label;
+
+  /// Compact form used where a U-year would otherwise go (e.g. "Ph.D.").
+  final String shortLabel;
+
+  bool get hasUYear => this == undergraduate;
+
+  /// Exchange and continuing-studies students often have no declared program.
+  bool get requiresMajor => this != exchangeOrContinuing;
+}
+
+/// McGill undergraduate U-years.
+const List<String> academicYears = ['U0', 'U1', 'U2', 'U3', 'U4+'];
+
+/// Froshie = new to McGill: every U0, plus U1s in their first year (entering
+/// from CEGEP or with AP/IB transfer credits). Drives the Froshie badge and
+/// Frosh event recommendations.
+bool isFroshieStanding(String? year, {required bool firstYearAtMcGill}) =>
+    year == 'U0' || (year == 'U1' && firstYearAtMcGill);
+
+/// Everything that can fill the "year" slot on a profile: a U-year for
+/// undergrads, otherwise the degree level. Used by Edit Profile.
+final List<String> academicStandings = [
+  ...academicYears,
+  for (final level in DegreeLevel.values)
+    if (!level.hasUYear) level.shortLabel,
+];

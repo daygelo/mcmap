@@ -161,6 +161,8 @@ ThemeData buildMcMapTheme() {
     onSecondaryContainer: McMapColors.ink,
     tertiary: McMapColors.burgundy,
     onTertiary: McMapColors.white,
+    tertiaryContainer: McMapColors.redTint,
+    onTertiaryContainer: McMapColors.burgundy,
     error: McMapColors.error,
     onError: McMapColors.white,
     surface: McMapColors.white,
@@ -211,6 +213,18 @@ ThemeData buildMcMapTheme() {
       ),
     ),
 
+    searchBarTheme: SearchBarThemeData(
+      backgroundColor: const WidgetStatePropertyAll(McMapColors.white),
+      elevation: const WidgetStatePropertyAll(0),
+      shape: const WidgetStatePropertyAll(
+        StadiumBorder(side: BorderSide(color: McMapColors.border)),
+      ),
+      textStyle: WidgetStatePropertyAll(McMapFonts.textTheme.bodyLarge),
+      hintStyle: WidgetStatePropertyAll(
+        McMapFonts.textTheme.bodyLarge!.copyWith(color: McMapColors.slate),
+      ),
+    ),
+
     // Primary CTA (RSVP, Continue): deep McGill red → burgundy when pressed.
     filledButtonTheme: FilledButtonThemeData(
       style: ButtonStyle(
@@ -246,7 +260,20 @@ ThemeData buildMcMapTheme() {
     ),
 
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: McMapColors.redStrong),
+      style: TextButton.styleFrom(
+        foregroundColor: McMapColors.redStrong,
+        textStyle: McMapFonts.textTheme.labelLarge,
+      ),
+    ),
+
+    radioTheme: RadioThemeData(
+      fillColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return McMapColors.slateLight;
+        }
+        if (states.contains(WidgetState.selected)) return McMapColors.red;
+        return McMapColors.slate;
+      }),
     ),
 
     // Category tags / filters: neutral pill; selected = red tint + burgundy.

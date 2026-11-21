@@ -45,7 +45,6 @@ class _LoginPageState extends State<LoginPage> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: Card(
-                  elevation: 2,
                   child: Padding(
                     padding: const EdgeInsets.all(28),
                     child: Column(

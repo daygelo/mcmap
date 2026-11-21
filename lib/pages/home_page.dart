@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'student/edit_profile_page.dart';
 import '../models/user_profile.dart';
+import '../theme/app_theme.dart';
 import 'student/settings_page.dart';
 import 'student/student_profile.dart';
 
@@ -55,13 +56,17 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     final matchingEvents = _sampleEvents.where(
       (event) => event.matches(_query),
     );
 
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: McMapColors.red,
+        foregroundColor: McMapColors.white,
+        titleTextStyle: AppBarTheme.of(context).titleTextStyle
+            ?.copyWith(color: McMapColors.white, fontWeight: FontWeight.w700),
         title: const Text('McMap'),
         actions: [
           IconButton(
@@ -86,10 +91,7 @@ class _HomePageState extends State<HomePage> {
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
-                Text(
-                  'Find club events',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
+                Text('Find club events', style: text.headlineMedium),
                 const SizedBox(height: 16),
                 SearchBar(
                   hintText: 'Search clubs or events',
@@ -102,12 +104,8 @@ class _HomePageState extends State<HomePage> {
                   },
                 ),
                 const SizedBox(height: 24),
-                Text(
-                  'Club events',
-                  style: Theme.of(context).textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const Text('Sample events'),
+                Text('Club events', style: text.titleLarge),
+                Text('Sample events', style: text.bodySmall),
                 if (widget.profile != null) ...[
                   const SizedBox(height: 8),
                   Text('${_profile.major} · ${_profile.faculty}'),
@@ -131,56 +129,6 @@ class _HomePageState extends State<HomePage> {
                     isGoing: _rsvps.containsKey(event),
                     onRsvp: () => _toggleRsvp(event),
                   ),
-                const SizedBox(height: 24),
-                Text(
-                  'Explore campus',
-                  style: Theme.of(context).textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _QuickAction(
-                        icon: Icons.map_rounded,
-                        label: 'Campus map',
-                        color: colorScheme.primaryContainer,
-                        onTap: () => _selectDestination(1),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _QuickAction(
-                        icon: Icons.school_rounded,
-                        label: 'Buildings',
-                        color: colorScheme.secondaryContainer,
-                        onTap: () {},
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _QuickAction(
-                        icon: Icons.restaurant_rounded,
-                        label: 'Dining',
-                        color: colorScheme.tertiaryContainer,
-                        onTap: () {},
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _QuickAction(
-                        icon: Icons.local_parking_rounded,
-                        label: 'Parking',
-                        color: colorScheme.surfaceContainerHighest,
-                        onTap: () {},
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
             const Center(child: Text('Campus map is coming soon.')),
@@ -188,10 +136,7 @@ class _HomePageState extends State<HomePage> {
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
-                Text(
-                  'Your profile',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
+                Text('Your profile', style: text.headlineMedium),
                 const SizedBox(height: 12),
                 ProfileHeader(
                   profile: _profile,
@@ -205,10 +150,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  'Your RSVPs',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                Text('Your RSVPs', style: text.titleLarge),
                 if (_rsvps.isEmpty) const Text('You have no RSVPs yet.'),
                 for (final entry in _rsvps.entries)
                   _EventCard(
@@ -304,6 +246,7 @@ class _EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -311,11 +254,11 @@ class _EventCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(event.title, style: Theme.of(context).textTheme.titleMedium),
-            Text(event.club),
+            Text(event.title, style: text.titleMedium),
+            Text(event.club, style: text.bodySmall),
             const SizedBox(height: 4),
-            Text(event.schedule),
-            Text(event.location),
+            Text(event.schedule, style: text.bodySmall),
+            Text(event.location, style: text.bodySmall),
             if (visibility case final audience?)
               Text('Going · Demo visibility: ${audience.label}'),
             const SizedBox(height: 8),
@@ -327,47 +270,6 @@ class _EventCard extends StatelessWidget {
             else
               FilledButton(onPressed: onRsvp, child: const Text('RSVP')),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickAction extends StatelessWidget {
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.zero,
-      color: color,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 32),
-              const SizedBox(height: 20),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
         ),
       ),
     );

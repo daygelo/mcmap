@@ -85,7 +85,6 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
                   initialValue: _major,
                   isExpanded: true,
                   decoration: InputDecoration(
-                    border: const OutlineInputBorder(),
                     hintText: _faculty == null
                         ? 'Pick a faculty first'
                         : 'Select your major',

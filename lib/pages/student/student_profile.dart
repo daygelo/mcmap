@@ -59,7 +59,7 @@ class ProfileHeader extends StatelessWidget {
             ProfileAvatar(profile: profile),
             const SizedBox(height: 12),
             Text('McMap Student', style: text.titleLarge),
-            const Text('Sample profile'),
+            Text('Sample profile', style: text.bodySmall),
             const SizedBox(height: 8),
             Text('${profile.major} · ${profile.year}'),
             Text(profile.faculty),

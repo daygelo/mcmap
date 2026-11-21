@@ -41,7 +41,13 @@ void main() {
     expect(find.text('Club events'), findsOneWidget);
     expect(find.text('Board Game Night'), findsOneWidget);
     final header = tester.element(find.text('McMap'));
-    expect(DefaultTextStyle.of(header).style.fontFamily, McMapFonts.serif);
+    final appBar = tester.widget<AppBar>(find.byType(AppBar));
+    final titleStyle = DefaultTextStyle.of(header).style;
+    final gear = tester.element(find.byIcon(Icons.settings_outlined));
+    expect(appBar.backgroundColor, const Color(0xFFED1B2F));
+    expect(titleStyle.color, McMapColors.white);
+    expect(titleStyle.fontFamily, McMapFonts.serif);
+    expect(IconTheme.of(gear).color, McMapColors.white);
     expect(Theme.of(header).colorScheme.primary, McMapColors.redStrong);
   });
 
@@ -61,6 +67,47 @@ void main() {
     await tester.enterText(search, 'no matching club');
     await tester.pumpAndSettle();
     expect(find.text('No club events match your search.'), findsOneWidget);
+  });
+
+  testWidgets('the club feed ends after events at four viewport widths', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final width in [320.0, 390.0, 768.0, 1280.0]) {
+      await tester.binding.setSurfaceSize(Size(width, 600));
+      await tester.pumpWidget(
+        MaterialApp(
+          key: ValueKey(width),
+          theme: buildMcMapTheme(),
+          home: const HomePage(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final feed = find.byType(ListView).first;
+      final lastEvent = find.text('Campus Coding Meetup');
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(of: feed, matching: find.byType(Scrollable)).first,
+      );
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+
+      for (final label in [
+        'Explore campus',
+        'Campus map',
+        'Buildings',
+        'Dining',
+        'Parking',
+      ]) {
+        expect(find.text(label), findsNothing);
+      }
+      expect(lastEvent.hitTestable(), findsOneWidget);
+      final lastCard = find.ancestor(
+        of: lastEvent,
+        matching: find.byType(Card),
+      );
+      expect(tester.getRect(feed).bottom - tester.getRect(lastCard).bottom, 24);
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets('shows an RSVP in Profile and syncs cancellation to Home', (

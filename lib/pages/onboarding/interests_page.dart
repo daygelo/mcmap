@@ -141,6 +141,7 @@ class _InterestTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final labelStyle = Theme.of(context).textTheme.labelLarge;
     return Semantics(
       button: true,
       selected: selected,
@@ -157,12 +158,16 @@ class _InterestTile extends StatelessWidget {
               children: [
                 DecoratedBox(
                   decoration: BoxDecoration(
+                    // Category colors are specific to these tiles. Darken
+                    // the label area for contrast across the whole palette.
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
+                      stops: const [0, 0.45, 1],
                       colors: [
                         interest.color,
-                        Color.lerp(interest.color, Colors.black, 0.35)!,
+                        Color.lerp(interest.color, McMapColors.ink, 0.25)!,
+                        Color.lerp(interest.color, McMapColors.ink, 0.75)!,
                       ],
                     ),
                   ),
@@ -171,7 +176,7 @@ class _InterestTile extends StatelessWidget {
                   child: Icon(
                     interest.icon,
                     size: 44,
-                    color: Colors.white.withValues(alpha: 0.9),
+                    color: McMapColors.white.withValues(alpha: 0.9),
                   ),
                 ),
                 Positioned(
@@ -182,9 +187,9 @@ class _InterestTile extends StatelessWidget {
                     interest.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
+                    style: labelStyle?.copyWith(
+                      color: McMapColors.white,
+                      shadows: [Shadow(blurRadius: 6, color: McMapColors.ink)],
                     ),
                   ),
                 ),
@@ -193,8 +198,8 @@ class _InterestTile extends StatelessWidget {
                   duration: const Duration(milliseconds: 150),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      border: Border.all(color: Colors.white, width: 3),
+                      color: McMapColors.ink.withValues(alpha: 0.35),
+                      border: Border.all(color: McMapColors.white, width: 3),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     alignment: Alignment.topRight,
@@ -205,7 +210,7 @@ class _InterestTile extends StatelessWidget {
                       child: Icon(
                         Icons.check_rounded,
                         size: 16,
-                        color: Colors.white,
+                        color: McMapColors.white,
                       ),
                     ),
                   ),

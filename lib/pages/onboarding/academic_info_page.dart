@@ -15,8 +15,9 @@ class AcademicInfoPage extends StatefulWidget {
 class _AcademicInfoPageState extends State<AcademicInfoPage> {
   String? _faculty;
   String? _major;
+  String? _year;
 
-  bool get _canContinue => _faculty != null && _major != null;
+  bool get _canContinue => _faculty != null && _major != null && _year != null;
 
   void _selectFaculty(String faculty) {
     if (faculty == _faculty) return;
@@ -30,7 +31,11 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => InterestsPage(
-          profile: UserProfile(faculty: _faculty!, major: _major!),
+          profile: UserProfile(
+            faculty: _faculty!,
+            major: _major!,
+            year: _year!,
+          ),
         ),
       ),
     );
@@ -44,7 +49,7 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
         : majorsByFaculty[_faculty]!;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Step 1 of 2')),
+      appBar: AppBar(title: const Text('Step 1 of 3')),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -96,6 +101,16 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
                   onChanged: _faculty == null
                       ? null
                       : (value) => setState(() => _major = value),
+                ),
+                const SizedBox(height: 20),
+                DropdownButtonFormField<String>(
+                  initialValue: _year,
+                  decoration: const InputDecoration(labelText: 'Academic year'),
+                  items: [
+                    for (final year in academicYears)
+                      DropdownMenuItem(value: year, child: Text(year)),
+                  ],
+                  onChanged: (value) => setState(() => _year = value),
                 ),
               ],
             ),

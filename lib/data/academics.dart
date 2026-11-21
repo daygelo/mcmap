@@ -90,3 +90,5 @@ const Map<String, List<String>> majorsByFaculty = {
     'Statistics',
   ],
 };
+
+const academicYears = ['U0', 'U1', 'U2', 'U3', 'U4'];

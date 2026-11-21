@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/academics.dart';
 import '../../data/interests.dart';
+import '../../models/user_profile.dart';
 import 'student_profile.dart';
 
 const _faculties = [
@@ -12,7 +13,6 @@ const _faculties = [
   'Faculty of Education',
   'Other',
 ];
-const _years = ['U0', 'U1', 'U2', 'U3', 'U4'];
 const _interestOptions = [
   'Programming',
   'Gaming',
@@ -35,8 +35,8 @@ class EditProfilePage extends StatefulWidget {
     required this.onSave,
   });
 
-  final StudentProfile profile;
-  final Future<void> Function(StudentProfile) onSave;
+  final UserProfile profile;
+  final Future<void> Function(UserProfile) onSave;
 
   @override
   State<EditProfilePage> createState() => _EditProfilePageState();
@@ -48,7 +48,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late final _bio = TextEditingController(text: widget.profile.bio);
   late final _interests = {...widget.profile.interests};
   late String _faculty = widget.profile.faculty;
-  late String _year = widget.profile.year;
+  late String? _year = widget.profile.year;
   bool _saving = false;
 
   @override
@@ -64,13 +64,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
     setState(() => _saving = true);
     try {
       await widget.onSave(
-        StudentProfile(
+        widget.profile.copyWith(
           faculty: _faculty,
           major: _major.text.trim(),
           year: _year,
           bio: _bio.text.trim(),
           interests: Set.unmodifiable(_interests),
-          avatarUrl: widget.profile.avatarUrl,
         ),
       );
     } catch (_) {
@@ -147,7 +146,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         labelText: 'Academic year',
                       ),
                       items: [
-                        for (final option in _years)
+                        for (final option in academicYears)
                           DropdownMenuItem(value: option, child: Text(option)),
                       ],
                       onChanged: _saving

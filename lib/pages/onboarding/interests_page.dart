@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/interests.dart';
 import '../../models/user_profile.dart';
 import '../../theme/app_theme.dart';
+import '../club_picker_page.dart';
 import '../home_page.dart';
 
 /// Onboarding step 2 (optional): Instagram-style grid of interests to tap.
@@ -28,10 +29,14 @@ class _InterestsPageState extends State<InterestsPage> {
     });
   }
 
-  void _finish() {
-    // An empty set is valid: the feed falls back to faculty + general events.
-    final profile = widget.profile.copyWith(interests: Set.of(_selected));
-    // Onboarding is done: replace the whole stack so Back doesn't return here.
+  Future<void> _continueToClubs() async {
+    final ids = await Navigator.of(context).push<Set<String>>(
+      MaterialPageRoute(builder: (_) => const ClubPickerPage(onboarding: true)),
+    );
+    if (!mounted || ids == null) return;
+    final profile = widget.profile
+        .copyWith(interests: _selected)
+        .withClubIds(ids);
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => HomePage(profile: profile)),
       (_) => false,
@@ -44,7 +49,7 @@ class _InterestsPageState extends State<InterestsPage> {
     final count = _selected.length;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Step 2 of 2')),
+      appBar: AppBar(title: const Text('Step 2 of 3')),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -107,7 +112,7 @@ class _InterestsPageState extends State<InterestsPage> {
             child: count == 0
                 ? OutlinedButton(
                     key: const ValueKey('skip'),
-                    onPressed: _finish,
+                    onPressed: _continueToClubs,
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                     ),
@@ -115,7 +120,7 @@ class _InterestsPageState extends State<InterestsPage> {
                   )
                 : FilledButton(
                     key: const ValueKey('continue'),
-                    onPressed: _finish,
+                    onPressed: _continueToClubs,
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                     ),

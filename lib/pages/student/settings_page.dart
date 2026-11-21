@@ -1,15 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
-/// Demo audience values. The backend must authorize access independently.
-enum StudentVisibility {
-  private('Private'),
-  friends('Friends'),
-  public('Public');
+import '../../models/student_visibility.dart';
 
-  const StudentVisibility(this.label);
-
-  final String label;
-}
+export '../../models/student_visibility.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({

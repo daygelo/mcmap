@@ -32,7 +32,6 @@ dependencies:
     sdk: flutter
   material_ui: ^1.1.0
 
-  # Supabase authentication and persistent sessions
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
@@ -58,6 +57,26 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Bundled so typography is identical on web, iOS and Android.
+  # Both fonts are SIL Open Font License.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-400.ttf
+        - asset: assets/fonts/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-700.ttf
+          weight: 700
+    - family: SourceSerif4
+      fonts:
+        - asset: assets/fonts/SourceSerif4-400.ttf
+        - asset: assets/fonts/SourceSerif4-600.ttf
+          weight: 600
+        - asset: assets/fonts/SourceSerif4-700.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:

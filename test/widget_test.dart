@@ -2,30 +2,55 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'package:mcmap/main.dart';
+import 'package:mcmap/pages/home_page.dart';
+import 'package:mcmap/theme/app_theme.dart';
 import 'package:mcmap/pages/student/settings_page.dart';
+
+/// Login → pick Engineering / Software Engineering → land on interests.
+Future<void> _goToInterests(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(1200, 2400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+
+  await tester.pumpWidget(const McMapApp());
+  expect(find.text('Welcome to McMap'), findsOneWidget);
+
+  await tester.tap(find.text('Continue with Microsoft'));
+  await tester.pumpAndSettle();
+  expect(find.text('What do you study?'), findsOneWidget);
+
+  await tester.tap(find.text('Engineering'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byType(DropdownButtonFormField<String>));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Software Engineering').last);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Continue'));
+  await tester.pumpAndSettle();
+  expect(find.text('What are you into?'), findsOneWidget);
+}
 
 void main() {
   testWidgets('shows the McMap home page', (WidgetTester tester) async {
-    await tester.pumpWidget(const McMapApp());
+    await tester.pumpWidget(
+      MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+    );
 
     expect(find.text('McMap'), findsOneWidget);
     expect(find.text('Find club events'), findsOneWidget);
     expect(find.text('Club events'), findsOneWidget);
     expect(find.text('Board Game Night'), findsOneWidget);
     final header = tester.element(find.text('McMap'));
-    final search = tester.element(find.byType(SearchBar));
-    expect(AppBarTheme.of(header).backgroundColor, const Color(0xFF9E0918));
-    expect(DefaultTextStyle.of(header).style.fontWeight, FontWeight.w800);
-    expect(
-      SearchBarTheme.of(search).backgroundColor?.resolve({}),
-      const Color(0xFFFFF1F2),
-    );
+    expect(DefaultTextStyle.of(header).style.fontFamily, McMapFonts.serif);
+    expect(Theme.of(header).colorScheme.primary, McMapColors.redStrong);
   });
 
   testWidgets('filters events by club and shows an empty state', (
     tester,
   ) async {
-    await tester.pumpWidget(const McMapApp());
+    await tester.pumpWidget(
+      MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+    );
 
     final search = find.byType(SearchBar);
     await tester.enterText(search, '  PHOTOGRAPHY  ');
@@ -41,7 +66,9 @@ void main() {
   testWidgets('shows an RSVP in Profile and syncs cancellation to Home', (
     tester,
   ) async {
-    await tester.pumpWidget(const McMapApp());
+    await tester.pumpWidget(
+      MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+    );
 
     await tester.tap(find.text('RSVP').first);
     await tester.pumpAndSettle();
@@ -66,7 +93,9 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(375, 700));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(const McMapApp());
+    await tester.pumpWidget(
+      MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+    );
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit Profile'));
@@ -76,8 +105,14 @@ void main() {
     final bio = find.byType(TextFormField).last;
     final save = find.text('Save Changes');
     final editorScroll = find.byType(Scrollable).first;
-    Future<void> scrollTo(Finder target, double delta) =>
-        tester.scrollUntilVisible(target, delta, scrollable: editorScroll);
+    Future<void> scrollTo(Finder target, double delta) async {
+      for (var attempt = 0; attempt < 20; attempt++) {
+        if (target.hitTestable().evaluate().isNotEmpty) return;
+        await tester.drag(editorScroll, Offset(0, -delta));
+        await tester.pumpAndSettle();
+      }
+      expect(target.hitTestable(), findsOneWidget);
+    }
 
     await tester.enterText(major, '   ');
     await scrollTo(save, 250);
@@ -135,7 +170,9 @@ void main() {
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 950));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(const McMapApp());
+      await tester.pumpWidget(
+        MaterialApp(theme: buildMcMapTheme(), home: const HomePage()),
+      );
 
       await tester.tap(find.text('RSVP').first);
       await tester.pumpAndSettle();
@@ -193,4 +230,51 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('picking interests carries them to home', (tester) async {
+    await _goToInterests(tester);
+
+    for (final name in ['Music', 'Coding', 'Coffee']) {
+      await tester.tap(
+        find.ancestor(
+          of: find.text(name),
+          matching: find.byType(GestureDetector),
+        ),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Skip for now'), findsNothing);
+    await tester.tap(find.text('Continue · 3 selected'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
+    expect(find.text('Coding').hitTestable(), findsOneWidget);
+    expect(find.text('Board Game Night'), findsOneWidget);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Coding').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('Edit Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Engineering'), findsOneWidget);
+    final coding = find.widgetWithText(FilterChip, 'Coding');
+    await tester.scrollUntilVisible(
+      coding,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(tester.widget<FilterChip>(coding).selected, isTrue);
+  });
+
+  testWidgets('interests step can be skipped with none selected', (
+    tester,
+  ) async {
+    await _goToInterests(tester);
+
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
+    expect(find.text('Add interests later from Edit Profile.'), findsOneWidget);
+  });
 }

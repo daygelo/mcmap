@@ -1,12 +1,14 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'student/edit_profile_page.dart';
-import 'student/mcmap_theme.dart';
+import '../models/user_profile.dart';
 import 'student/settings_page.dart';
 import 'student/student_profile.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.profile});
+
+  final UserProfile? profile;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -16,7 +18,14 @@ class _HomePageState extends State<HomePage> {
   final _rsvps = <_ClubEvent, StudentVisibility>{};
   final _rsvpVisibility = ValueNotifier(StudentVisibility.private);
   final _profileVisibility = ValueNotifier(StudentVisibility.private);
-  StudentProfile _profile = const StudentProfile();
+  late StudentProfile _profile = switch (widget.profile) {
+    final profile? => StudentProfile(
+      faculty: profile.faculty,
+      major: profile.major,
+      interests: Set.unmodifiable(profile.interests),
+    ),
+    null => const StudentProfile(),
+  };
   String _query = '';
   int _selectedIndex = 0;
 
@@ -46,13 +55,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Theme(
-      data: mcMapTheme,
-      child: Builder(builder: _buildStudentShell),
-    );
-  }
-
-  Widget _buildStudentShell(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final matchingEvents = _sampleEvents.where(
       (event) => event.matches(_query),
@@ -106,6 +108,20 @@ class _HomePageState extends State<HomePage> {
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const Text('Sample events'),
+                if (widget.profile != null) ...[
+                  const SizedBox(height: 8),
+                  Text('${_profile.major} · ${_profile.faculty}'),
+                  if (_profile.interests.isEmpty)
+                    const Text('Add interests later from Edit Profile.')
+                  else
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final interest in _profile.interests)
+                          Chip(label: Text(interest)),
+                      ],
+                    ),
+                ],
                 const SizedBox(height: 12),
                 if (matchingEvents.isEmpty)
                   const Text('No club events match your search.'),

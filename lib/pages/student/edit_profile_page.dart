@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../data/academics.dart';
+import '../../data/interests.dart';
 import 'student_profile.dart';
 
 const _faculties = [
@@ -115,7 +117,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       initialValue: _faculty,
                       decoration: const InputDecoration(labelText: 'Faculty'),
                       items: [
-                        for (final option in _faculties)
+                        for (final option in {
+                          ...majorsByFaculty.keys,
+                          ..._faculties,
+                          widget.profile.faculty,
+                        })
                           DropdownMenuItem(value: option, child: Text(option)),
                       ],
                       onChanged: _saving
@@ -168,7 +174,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     Wrap(
                       spacing: 8,
                       children: [
-                        for (final interest in _interestOptions)
+                        for (final interest in {
+                          ...allInterests.map((interest) => interest.name),
+                          ..._interestOptions,
+                          ...widget.profile.interests,
+                        })
                           FilterChip(
                             label: Text(interest),
                             selected: _interests.contains(interest),

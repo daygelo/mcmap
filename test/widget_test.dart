@@ -47,8 +47,21 @@ void main() {
     expect(appBar.backgroundColor, const Color(0xFFED1B2F));
     expect(titleStyle.color, McMapColors.white);
     expect(titleStyle.fontFamily, McMapFonts.serif);
+    expect(titleStyle.fontSize, 26);
     expect(IconTheme.of(gear).color, McMapColors.white);
-    expect(Theme.of(header).colorScheme.primary, McMapColors.redStrong);
+    final rsvp = tester.element(
+      find.widgetWithText(FilledButton, 'RSVP').first,
+    );
+    final buttonStyle = FilledButtonTheme.of(rsvp).style!;
+    final buttonFill = buttonStyle.backgroundColor!.resolve({})!;
+    final buttonText = buttonStyle.foregroundColor!.resolve({})!;
+    expect(buttonFill, const Color(0xFFE81B2F));
+    expect(buttonText, McMapColors.white);
+    expect(
+      (buttonText.computeLuminance() + 0.05) /
+          (buttonFill.computeLuminance() + 0.05),
+      greaterThanOrEqualTo(4.5),
+    );
   });
 
   testWidgets('filters events by club and shows an empty state', (

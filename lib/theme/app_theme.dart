@@ -10,8 +10,10 @@ abstract final class McMapColors {
   /// text. White text on it is only 4.38:1, so don't use it behind body text.
   static const red = Color(0xFFED1B2F);
 
-  /// Deeper McGill red for anything carrying text: filled buttons (white on
-  /// it 5.88:1) and red text/links on white (5.88:1).
+  /// Near-brand red for fills with white labels (4.54:1 contrast).
+  static const redFill = Color(0xFFE81B2F);
+
+  /// Deeper red for small text and links on light surfaces.
   static const redStrong = Color(0xFFC8102E);
 
   /// Burgundy: hover/pressed state of red buttons, text on tinted red
@@ -151,7 +153,7 @@ class McMapMapStyle extends ThemeExtension<McMapMapStyle> {
 ThemeData buildMcMapTheme() {
   const colorScheme = ColorScheme(
     brightness: Brightness.light,
-    primary: McMapColors.redStrong,
+    primary: McMapColors.redFill,
     onPrimary: McMapColors.white,
     primaryContainer: McMapColors.redTint,
     onPrimaryContainer: McMapColors.burgundy,
@@ -225,7 +227,7 @@ ThemeData buildMcMapTheme() {
       ),
     ),
 
-    // Primary CTA (RSVP, Continue): deep McGill red → burgundy when pressed.
+    // Primary actions use an accessible near-match to the brand red.
     filledButtonTheme: FilledButtonThemeData(
       style: ButtonStyle(
         shape: WidgetStatePropertyAll(shape),
@@ -243,7 +245,7 @@ ThemeData buildMcMapTheme() {
               s.contains(WidgetState.hovered)) {
             return McMapColors.burgundy;
           }
-          return McMapColors.redStrong;
+          return colorScheme.primary;
         }),
         overlayColor: const WidgetStatePropertyAll(Colors.transparent),
       ),
@@ -276,7 +278,7 @@ ThemeData buildMcMapTheme() {
       }),
     ),
 
-    // Category tags / filters: neutral pill; selected = red tint + burgundy.
+    // Category tags / filters: red tint and bright red selection marks.
     chipTheme: ChipThemeData(
       backgroundColor: McMapColors.white,
       selectedColor: McMapColors.redTint,
@@ -287,7 +289,7 @@ ThemeData buildMcMapTheme() {
         color: McMapColors.burgundy,
         fontWeight: FontWeight.w600,
       ),
-      checkmarkColor: McMapColors.burgundy,
+      checkmarkColor: McMapColors.red,
       side: WidgetStateBorderSide.resolveWith(
         (s) => BorderSide(
           color: s.contains(WidgetState.selected)

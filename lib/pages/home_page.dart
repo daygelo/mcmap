@@ -65,8 +65,11 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: McMapColors.red,
         foregroundColor: McMapColors.white,
-        titleTextStyle: AppBarTheme.of(context).titleTextStyle
-            ?.copyWith(color: McMapColors.white, fontWeight: FontWeight.w700),
+        titleTextStyle: AppBarTheme.of(context).titleTextStyle?.copyWith(
+          color: McMapColors.white,
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+        ),
         title: const Text('McMap'),
         actions: [
           IconButton(

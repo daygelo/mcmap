@@ -190,7 +190,8 @@ void main() {
     await _start(tester);
     await tester.binding.setSurfaceSize(const Size(390, 820));
     await tester.pumpAndSettle();
-    await _tapText(tester, 'Browse Clubs');
+    expect(find.widgetWithText(OutlinedButton, 'Browse Clubs'), findsNothing);
+    await _tapText(tester, 'See all clubs');
     await _search(tester, 'McGill Robotics');
     final robotics = find.widgetWithText(ListTile, 'McGill Robotics');
     Finder button(String label) => find.descendant(
@@ -316,7 +317,7 @@ void main() {
     await _start(tester);
     await _tapText(tester, 'Following');
     expect(find.text('Follow clubs to see their events here.'), findsOneWidget);
-    await _tapText(tester, 'Browse Clubs');
+    await _tapText(tester, 'See all clubs');
     await _search(tester, 'MESA');
     await _tapText(tester, _name(_esportsId));
     await _tapText(tester, 'Follow');
@@ -332,7 +333,7 @@ void main() {
       findsOneWidget,
     );
     await _tapText(tester, 'Home');
-    await _tapText(tester, 'Browse Clubs');
+    await _tapText(tester, 'See all clubs');
     await _search(tester, 'board game');
     expect(find.widgetWithText(OutlinedButton, 'Following'), findsOneWidget);
     await _back(tester);

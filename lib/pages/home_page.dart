@@ -341,21 +341,7 @@ class _HomePageState extends State<HomePage> {
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Find club events',
-                        style: text.headlineMedium,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton(
-                      onPressed: _browseClubs,
-                      child: const Text('Browse Clubs'),
-                    ),
-                  ],
-                ),
+                Text('Find club events', style: text.headlineMedium),
                 const SizedBox(height: 16),
                 SearchBar(
                   hintText: 'Search clubs or events',

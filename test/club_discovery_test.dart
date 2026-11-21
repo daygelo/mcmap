@@ -70,7 +70,15 @@ Future<void> _start(
   await tester.pumpAndSettle();
 }
 
-ClubEvent _published(String id, String clubId, String title, {DateTime? at}) {
+ClubEvent _published(
+  String id,
+  String clubId,
+  String title, {
+  DateTime? at,
+  DateTime? startsAt,
+  String? description,
+  bool cancelled = false,
+}) {
   final now = DateTime.now();
   return ClubEvent(
     id,
@@ -80,7 +88,9 @@ ClubEvent _published(String id, String clubId, String title, {DateTime? at}) {
     'Campus',
     clubId: clubId,
     publishedAt: at ?? now,
-    startsAt: now.add(const Duration(days: 1)),
+    startsAt: startsAt ?? now.add(const Duration(days: 1)),
+    description: description,
+    cancelled: cancelled,
     supportsUnrestrictedRsvp: true,
   );
 }
@@ -90,6 +100,183 @@ Finder _eventCard(String title) => find
     .hitTestable();
 
 void main() {
+  testWidgets(
+    'club feed groups previews and keeps RSVP on the previewed event',
+    (tester) async {
+      final stream = StreamController<ClubEvent>();
+      addTearDown(stream.close);
+      await _start(tester, followed: {_esportsId}, publications: stream.stream);
+      final now = DateTime.now();
+      stream
+        ..add(
+          _published(
+            'later',
+            _esportsId,
+            'Esports championship',
+            startsAt: now.add(const Duration(days: 3)),
+            description: 'Check in at the registration desk.',
+          ),
+        )
+        ..add(
+          _published(
+            'board',
+            _boardGamesId,
+            'Board game tournament',
+            startsAt: now.add(const Duration(days: 2)),
+          ),
+        )
+        ..add(
+          _published(
+            'next',
+            _esportsId,
+            'Beginner workshop',
+            startsAt: now.add(const Duration(hours: 5)),
+          ),
+        )
+        ..add(
+          _published(
+            'past',
+            _esportsId,
+            'Last week workshop',
+            startsAt: now.subtract(const Duration(days: 7)),
+          ),
+        )
+        ..add(
+          _published(
+            'cancelled',
+            _esportsId,
+            'Called off scrimmage',
+            cancelled: true,
+          ),
+        );
+      await tester.pumpAndSettle();
+
+      expect(find.text('View club events'), findsNWidgets(2));
+      expect(find.text('1 more from this club'), findsOneWidget);
+      expect(find.text('Esports championship'), findsNothing);
+      expect(
+        tester.getTopLeft(find.text('Beginner workshop')).dy,
+        lessThan(tester.getTopLeft(find.text('Board game tournament')).dy),
+      );
+      Finder action(String event, String label) =>
+          find.descendant(of: _eventCard(event), matching: find.text(label));
+      await _tap(tester, action('Beginner workshop', 'RSVP'));
+      expect(find.byType(ClubDetailPage), findsNothing);
+      expect(action('Beginner workshop', 'Cancel RSVP'), findsOneWidget);
+      await _tap(tester, action('Beginner workshop', 'View club events'));
+      expect(find.byType(ClubDetailPage), findsOneWidget);
+      expect(find.text(_name(_esportsId)), findsOneWidget);
+      expect(find.text('Next event'), findsOneWidget);
+      expect(find.text('More upcoming events'), findsOneWidget);
+      expect(find.text('Recent past events'), findsOneWidget);
+      expect(find.text('Cancelled events'), findsOneWidget);
+      expect(action('Esports championship', 'RSVP'), findsOneWidget);
+      expect(action('Last week workshop', 'RSVP'), findsNothing);
+      expect(action('Called off scrimmage', 'RSVP'), findsNothing);
+      await _tap(tester, action('Esports championship', 'Event details'));
+      expect(find.text('Event details'), findsOneWidget);
+      expect(find.text('Esports championship'), findsOneWidget);
+      expect(find.text('Check in at the registration desk.'), findsOneWidget);
+      await _back(tester);
+      await _back(tester);
+
+      await _tapText(tester, 'Following');
+      expect(find.text('View club events'), findsOneWidget);
+      expect(find.text('Board game tournament'), findsNothing);
+      await _search(tester, 'esports');
+      expect(find.text('Matching event'), findsOneWidget);
+      expect(find.text('Esports championship'), findsOneWidget);
+      expect(find.text('Beginner workshop').hitTestable(), findsNothing);
+      expect(action('Esports championship', 'RSVP'), findsOneWidget);
+      await _tapText(tester, 'Profile');
+      expect(action('Beginner workshop', 'Cancel RSVP'), findsOneWidget);
+      expect(find.text('Esports championship').hitTestable(), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'All searches club aliases and opens clubs using shared follow state',
+    (tester) async {
+      await _start(tester);
+      expect(find.text('Clubs & organizations'), findsNothing);
+      await _search(tester, 'mEsA');
+      expect(find.byType(SuggestedClubs), findsNothing);
+      final club = find.widgetWithText(ClubRow, _name(_esportsId));
+      expect(club, findsOneWidget);
+      expect(
+        find.descendant(
+          of: club,
+          matching: find.text(clubsById[_esportsId]!.category),
+        ),
+        findsOneWidget,
+      );
+      await _tap(
+        tester,
+        find.descendant(of: club, matching: find.text('Follow')),
+      );
+      await _tapText(tester, _name(_esportsId));
+      expect(find.byType(ClubDetailPage), findsOneWidget);
+      await _tapText(tester, 'Following');
+      await _back(tester);
+      expect(
+        find.descendant(of: club, matching: find.text('Follow')),
+        findsOneWidget,
+      );
+
+      await _search(tester, 'science');
+      expect(find.byType(McGillianTile), findsWidgets);
+      expect(find.byType(ClubRow), findsWidgets);
+      expect(find.text('Campus Coding Meetup'), findsOneWidget);
+      await _search(tester, 'mcgill');
+      await _tap(
+        tester,
+        find.textContaining(RegExp(r'^See all \d+ organizations$')),
+      );
+      expect(find.byType(ClubDirectoryPage), findsOneWidget);
+      expect(
+        tester.widget<SearchBar>(find.byType(SearchBar)).controller!.text,
+        'mcgill',
+      );
+      await _back(tester);
+      await _search(tester, 'science');
+      await _tapText(tester, 'Events');
+      expect(find.byType(McGillianTile), findsNothing);
+      expect(find.byType(ClubRow), findsNothing);
+      expect(find.text('Campus Coding Meetup'), findsOneWidget);
+      await _tapText(tester, 'McGillians');
+      expect(find.byType(McGillianTile), findsWidgets);
+      expect(find.byType(ClubRow), findsNothing);
+      expect(find.text('Campus Coding Meetup'), findsNothing);
+    },
+  );
+
+  testWidgets('Home re-tap animates to the top and keeps the search query', (
+    tester,
+  ) async {
+    await _start(tester);
+    await tester.binding.setSurfaceSize(const Size(390, 520));
+    await tester.pumpAndSettle();
+    await _search(tester, 'science');
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    scroll.position.jumpTo(320);
+    await tester.pumpAndSettle();
+    final offset = scroll.position.pixels;
+    expect(offset, greaterThan(0));
+
+    await tester.tap(find.text('Home'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(scroll.position.pixels, inExclusiveRange(0, offset));
+    await tester.pumpAndSettle();
+    expect(scroll.position.pixels, 0);
+    expect(
+      tester.widget<SearchBar>(find.byType(SearchBar)).controller!.text,
+      'science',
+    );
+    expect(find.text('Find club events').hitTestable(), findsOneWidget);
+  });
+
   testWidgets(
     'photo, clubs, academic edits, friends and RSVPs remain independent',
     (tester) async {
@@ -246,6 +433,10 @@ void main() {
     (tester) async {
       await _start(tester, interests: {'Robotics'});
       final section = find.byType(SuggestedClubs);
+      expect(section, findsNothing);
+      expect(find.text('Board Game Night'), findsOneWidget);
+      await _tapText(tester, 'Discover Clubs');
+      expect(find.text('Board Game Night'), findsNothing);
       final rows = find.descendant(of: section, matching: find.byType(ClubRow));
       List<String> names() =>
           tester.widgetList<ClubRow>(rows).map((row) => row.club.name).toList();
@@ -257,12 +448,16 @@ void main() {
         lessThan(tester.getTopLeft(section).dy),
       );
       expect(
-        tester.getBottomLeft(section).dy,
-        lessThan(tester.getTopLeft(find.text('Club events')).dy),
+        tester.getBottomLeft(find.text('Club events')).dy,
+        lessThan(tester.getTopLeft(section).dy),
       );
       await _search(tester, 'photo');
-      expect(names(), original);
+      expect(names(), isEmpty);
+      expect(find.text('Clubs & organizations'), findsOneWidget);
+      expect(find.text('Photo Walk'), findsOneWidget);
       await _search(tester, '');
+      await _tapText(tester, 'Discover Clubs');
+      expect(names(), original);
       await _tapText(tester, 'See all clubs');
       expect(find.byType(ClubDirectoryPage), findsOneWidget);
       await _back(tester);
@@ -327,6 +522,7 @@ void main() {
           if (club.name != 'McGill Robotics') club.id,
       },
     );
+    await _tapText(tester, 'Discover Clubs');
     final rows = find.descendant(
       of: find.byType(SuggestedClubs),
       matching: find.byType(ClubRow),
@@ -343,13 +539,14 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Home exposes a working Follow button without changing filters', (
+  testWidgets('Discover Clubs opens the directory without changing filters', (
     tester,
   ) async {
     await _start(tester);
     await tester.binding.setSurfaceSize(const Size(390, 820));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(OutlinedButton, 'Browse Clubs'), findsNothing);
+    await _tapText(tester, 'Discover Clubs');
     await _tapText(tester, 'See all clubs');
     await _search(tester, 'McGill Robotics');
     final robotics = find.widgetWithText(ListTile, 'McGill Robotics');
@@ -368,13 +565,12 @@ void main() {
       findsOneWidget,
     );
     await _back(tester);
-    final allEvents = find.widgetWithText(ChoiceChip, 'All Events');
-    await tester.scrollUntilVisible(
-      allEvents,
-      180,
-      scrollable: find.byType(Scrollable).first,
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Discover Clubs'))
+          .selected,
+      isTrue,
     );
-    expect(tester.widget<ChoiceChip>(allEvents).selected, isTrue);
     await _tapText(tester, 'Profile');
     expect(find.text('0 Club Memberships'), findsOneWidget);
     expect(find.text('No memberships are shown on Profile.'), findsOneWidget);
@@ -476,6 +672,7 @@ void main() {
     await _start(tester);
     await _tapText(tester, 'Following');
     expect(find.text('Follow clubs to see their events here.'), findsOneWidget);
+    await _tapText(tester, 'Discover Clubs');
     await _tapText(tester, 'See all clubs');
     await _search(tester, 'MESA');
     await _tapText(tester, _name(_esportsId));

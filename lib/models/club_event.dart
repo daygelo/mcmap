@@ -10,6 +10,7 @@ class ClubEvent {
     this.clubId,
     this.publishedAt,
     this.startsAt,
+    this.description,
     this.cancelled = false,
     this.supportsUnrestrictedRsvp = false,
   });
@@ -23,16 +24,27 @@ class ClubEvent {
   final String? clubId;
   final DateTime? publishedAt;
   final DateTime? startsAt;
+  final String? description;
   final bool cancelled;
 
   /// Set by the publication source only for in-app RSVPs with no external
   /// registration, ticket, payment, approval or unconfirmed capacity.
   final bool supportsUnrestrictedRsvp;
 
-  bool matches(String query) => [
+  bool isListedAt(DateTime now) => publishedAt?.isAfter(now) != true;
+
+  bool isUpcomingAt(DateTime now) =>
+      !cancelled && (startsAt?.isAfter(now) ?? false);
+
+  bool canRsvpAt(DateTime now) =>
+      !cancelled && startsAt?.isAfter(now) != false && isListedAt(now);
+
+  bool matchesDetails(String query) => [
     title,
-    club,
     schedule,
     location,
   ].any((value) => value.toLowerCase().contains(query));
+
+  bool matches(String query) =>
+      matchesDetails(query) || club.toLowerCase().contains(query);
 }

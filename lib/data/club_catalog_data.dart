@@ -49,6 +49,25 @@ const clubCatalogSources = <int, (String, String)>{
     "https://www.mcgill.ca/desautels/programs/bcom/student-life-resources/student-clubs",
   ),
   14: ("Recreation", "https://recreation.mcgill.ca/sport-clubs"),
+  15: ("Student government", "https://ssmu.ca/how-we-run/elections/"),
+  16: ("Engineering", "https://euswiki.mcgilleus.ca/clubs/junior-council/"),
+  17: ("Arts", "https://ausmcgill.com/committees/"),
+  18: ("Science", "https://susmcgill.ca/departmental-associations"),
+  19: ("Computer Science", "https://mcgill-csus.ca/fyc"),
+  20: ("Engineering", "https://ecsess.mcgilleus.ca/"),
+  21: ("Bioengineering", "https://buss.mcgilleus.ca/Getting%20Involved.html"),
+  22: (
+    "Mechanical Engineering",
+    "https://euswiki.mcgilleus.ca/departmental-societies/mcgill-association-of-mechanical-engineers/",
+  ),
+  23: ("Desautels", "https://www.musmcgill.com/copy-of-consulting-strategy"),
+  24: ("Education", "https://www.edusmcgill.com/committees"),
+  25: ("Political Science", "https://www.pssamcgill.ca/our-constitution"),
+  26: (
+    "Engineering",
+    "https://euswiki.mcgilleus.ca/departmental-societies/electrical-computer-and-software-engineering-stude/",
+  ),
+  27: ("Computer Science", "https://linktr.ee/mcgillcsus"),
 };
 
 // ID | official display name | source keys | organization type | aliases…
@@ -72,6 +91,7 @@ ssmu-borderless-world-volunteers|Borderless World Volunteers|2,3|club
 engineering-brewing-club|Brewing Club|12|club
 ssmu-british-appreciation-society-bas|British Society McGill (BritSoc)|10|club
 ssmu-mcgill-students-business-review|Business Review, McGill Students’|6,13|club|McGill Business Review
+buss-first-year-council|BUSS First-Year Council|21|firstYearCouncil|BUSS FYC|Bioengineering First Year Council
 ssmu-canadian-black-nurses-alliance-mcgill-chapter|Canadian Black Nurses Alliance McGill Chapter|8|club
 ssmu-canadian-coalition-for-global-health-research-cagh-mcgill-students-chapter-formerly-canadian-council-for-global-health-research-ccghr-mcgill-student-chapter|Canadian Coalition for Global Health Research (CAGH) McGill Students Chapter|3|club|CAGH
 ssmu-canadian-nursing-students-association-cnsa|Canadian Nursing Students Association (CNSA)|8|club|CNSA
@@ -95,6 +115,7 @@ desautels-consulting-academy-mcgill|Consulting Academy McGill|13|club
 ssmu-contemporary-review-of-genocide-and-political-violence|Contemporary Review of Genocide and Political Violence|6|club
 ssmu-counterpoint|Counterpoint|6|club
 ssmu-critical-media|Critical Media|6|club
+csus-first-year-council|CSUS First-Year Council|19,27|firstYearCouncil|CSUS FYC|Computer Science First Year Council
 ssmu-cycling-mcgill-2|Cycling @ McGill|1|club
 ssmu-mcgill-dance-pack|Dance Pack|4|club
 ssmu-democrats-abroad-mcgill-2|Democrats at McGill|9|club
@@ -107,6 +128,7 @@ ssmu-diversity-in-math|Diversity In Math|9|club
 ssmu-dragon-boat-z-2|Dragon Boat Z|1|club
 ssmu-dsign-lab|Dsign Lab|4|club
 desautels-dtech|DTech|13|club
+ecsess-bits|ECSESSBits|20,26|firstYearCommittee|ECSESS Bits|ECSESS First Year Council|ECSESS First Year Committee
 ssmu-effusion-a-cappella|Effusion A Cappella|4|club
 ssmu-egyptian-students-association-2|Egyptian Students Association|10|club
 engineering-electrical-computer-software-engineering-student-society-ecsess|Electrical, Computer, & Software Engineering Student Society (ECSESS)|12|studentSociety|ECSESS
@@ -115,13 +137,17 @@ engineering-engineering-undergraduate-society-eus|Engineering Undergraduate Soci
 engineering-engineers-in-action|Engineers in Action|12|club
 desautels-entertainment-management-conference|Entertainment Management Conference|13|club
 ssmu-esg-mcgill|ESG McGill|2,8,9|club
+eus-junior-council|EUS Junior Council (JC)|16|firstYearCommittee|Engineering Junior Council|EUS JC|EUS First-Year Committee
 ssmu-expanding-economics|Expanding Economics|9|club
 ssmu-falun-dafa-at-mcgill|Falun Dafa at McGill|5|club
 desautels-fashion-business-uncovered|Fashion Business Uncovered|13|club
+edus-fyre|First-Year Representatives of Education (FYRE)|24|firstYearCommittee|EdUS FYRE|EdUS First Year Committee
+sus-fuss|First-Year Undergraduate Science Society (FUSS)|18|firstYearSociety|SUS FUSS|SUS First-Year Council|First Year Undergraduate Science Students Society
 ssmu-fit-for-a-cause|Fit For a Cause|2|club
 ssmu-flag-football-club|Flag Football Club|1|club
 ssmu-folio-magazine|Folio Magazine|6|club
 ssmu-franc-jeu-2|Franc-Jeu|4|club
+aus-fearc|Freshmen Events Academic and Representative Committee (FEARC)|17|firstYearCommittee|AUS FEARC|AUS First-Year Committee|First Year Events Academic and Representative Council
 ssmu-friends-of-m%c3%a9decins-sans-fronti%c3%a8res-ssmu|Friends of Médecins Sans Frontières (MSF) – SSMU|9|club|MSF
 engineering-gamedev|GameDev|12|club
 ssmu-girls-for-ghana|Girls For Ghana|2|club
@@ -158,6 +184,7 @@ ssmu-lotus-dance-initative|Lotus Initiative|5|club
 mcgill-mcgss|Macdonald Campus Graduate Students’ Society|11|studentSociety|MCGSS
 mcgill-mcss|Macdonald Campus Students’ Society|11|studentSociety|MCSS
 ssmu-malaysian-and-singaporean-students-association-2|Malaysian and Singaporean Students’ Association (MASSA)|10|club|MASSA
+mame-first-year-council|MAME First-Year Council|22|firstYearCouncil|MAME FYC|Mechanical Engineering First Year Council
 desautels-mus|Management Undergraduate Society|13|studentSociety|MUS
 engineering-materials-engineering-undergraduate-society-meus|Materials Engineering Undergraduate Society (MEUS)|12|studentSociety|MEUS
 ssmu-mcconnect|McConnect|3|club
@@ -310,6 +337,7 @@ ssmu-montreal-heart-of-the-city-piano-program-2|Montreal Heart of the City Piano
 ssmu-moroccan-students-society|Moroccan Students’ Society|10|club
 ssmu-mosaica-ssmu|Mosaica Dance Company|4|club
 ssmu-multi-ethnic-student-alliance|Multi-Ethnic Student Alliance|10|club
+mus-first-year-involvement-team|MUS First-Year Involvement Team (FIT)|23|firstYearCommittee|MUS FIT|Management First-Year Team
 ssmu-muslim-students-association-msa|Muslim Students’ Association (MSA)|10|club|MSA
 engineering-national-organization-for-business-and-engineering|National Organization for Business and Engineering|12|club
 engineering-national-society-of-black-engineers-nsbe|National Society of Black Engineers (NSBE)|12|club|NSBE
@@ -330,6 +358,7 @@ mcgill-pgss|Post-Graduate Students’ Society|11|studentSociety|PGSS
 ssmu-power-to-change|Power to Change (P2C)|10|club|P2C
 ssmu-projet-montreal-mcgill-students-association|Projet Montréal McGill Students Association|3,9|club
 engineering-promoting-opportunities-for-women-in-engineering-powe|Promoting Opportunities for Women in Engineering (POWE)|12|club|POWE
+pssa-first-year-council|PSSA First-Year Council|25|firstYearCouncil|PSSA FYC|Political Science First Year Council
 engineering-queer-engineer|Queer Engineer|12|club
 desautels-real-estate-club|Real Estate Club|13|club
 engineering-reboot-mcgill|Reboot McGill|12|club
@@ -351,6 +380,7 @@ ssmu-socratic-discussion-club|Socratic Discussion Club|8|club
 ssmu-soulstice-a-cappella|Soulstice a Cappella|4|club
 ssmu-spanish-and-latin-american-students-association-of-mcgill-university-slasa|Spanish and Latin American Students’ Association of McGill University (SLASA)|10|club|SLASA
 ssmu-speak-to-lead|Speak to Lead (Formerly McGill Students for Lead to Speak)|8|club|McGill Students for Lead to Speak
+ssmu-first-year-council|SSMU First-Year Council|15|firstYearCouncil|SSMU FYC|First Year Council|FYC
 ssmu-ssmu-football-enthusiasts-club|SSMU Football Enthusiasts’ Club|1|club
 ssmu-ssmu-power-lifting|SSMU Powerlifting Club|1|club
 ssmu-ssmu-ski-and-snowboard-club|SSMU Ski and Snowboard Club|1|club

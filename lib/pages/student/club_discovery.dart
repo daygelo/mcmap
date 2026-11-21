@@ -63,22 +63,30 @@ class ClubDirectoryPage extends StatefulWidget {
     required this.followedIds,
     required this.onFollow,
     required this.onOpen,
+    this.initialQuery = '',
   });
 
   final Set<String> followedIds;
   final ValueChanged<String> onFollow;
   final ValueChanged<ClubOrganization> onOpen;
+  final String initialQuery;
 
   @override
   State<ClubDirectoryPage> createState() => _ClubDirectoryPageState();
 }
 
 class _ClubDirectoryPageState extends State<ClubDirectoryPage> {
-  String _query = '';
+  late final _search = TextEditingController(text: widget.initialQuery);
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final clubs = clubCatalog.where((club) => club.matches(_query)).toList();
+    final clubs = searchClubCatalog(_search.text);
     return Scaffold(
       appBar: AppBar(title: const Text('Browse Clubs')),
       body: SafeArea(
@@ -87,10 +95,10 @@ class _ClubDirectoryPageState extends State<ClubDirectoryPage> {
             Padding(
               padding: const EdgeInsets.all(16),
               child: SearchBar(
+                controller: _search,
                 hintText: 'Search club names or aliases',
                 leading: const Icon(Icons.search),
-                onChanged: (value) =>
-                    setState(() => _query = normalizeClubSearch(value)),
+                onChanged: (_) => setState(() {}),
               ),
             ),
             if (clubs.isEmpty)
@@ -231,7 +239,10 @@ class ClubDetailPage extends StatelessWidget {
     required this.notifications,
     required this.onFollow,
     required this.onNotifications,
-    required this.eventCards,
+    required this.upcoming,
+    required this.past,
+    required this.undated,
+    required this.cancelled,
   });
 
   final ClubOrganization club;
@@ -239,7 +250,10 @@ class ClubDetailPage extends StatelessWidget {
   final bool notifications;
   final VoidCallback onFollow;
   final ValueChanged<bool> onNotifications;
-  final List<Widget> eventCards;
+  final List<Widget> upcoming;
+  final List<Widget> past;
+  final List<Widget> undated;
+  final List<Widget> cancelled;
 
   @override
   Widget build(BuildContext context) {
@@ -277,11 +291,30 @@ class ClubDetailPage extends StatelessWidget {
                 onChanged: onNotifications,
               ),
             const SizedBox(height: 20),
-            Text('Upcoming events', style: text.titleLarge),
-            const SizedBox(height: 8),
-            if (eventCards.isEmpty)
+            if (upcoming.isEmpty) ...[
+              Text('Upcoming events', style: text.titleLarge),
               const Text('No upcoming events are listed.'),
-            ...eventCards,
+            ] else ...[
+              Text('Next event', style: text.titleLarge),
+              const SizedBox(height: 8),
+              upcoming.first,
+              if (upcoming.length > 1) ...[
+                Text('More upcoming events', style: text.titleLarge),
+                const SizedBox(height: 8),
+                ...upcoming.skip(1),
+              ],
+            ],
+            for (final (title, cards) in [
+              ('Unconfirmed schedules', undated),
+              ('Recent past events', past),
+              ('Cancelled events', cancelled),
+            ])
+              if (cards.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(title, style: text.titleLarge),
+                const SizedBox(height: 8),
+                ...cards,
+              ],
           ],
         ),
       ),

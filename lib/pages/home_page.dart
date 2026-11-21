@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/academics.dart';
+import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
 import '../models/club_event.dart';
 import '../services/local_rsvps.dart';
@@ -27,6 +28,16 @@ enum _SearchScope {
   mcgillians('McGillians');
 
   const _SearchScope(this.label);
+
+  final String label;
+}
+
+enum _EventDiscovery {
+  all('All Events'),
+  following('Following'),
+  discover('Discover Clubs');
+
+  const _EventDiscovery(this.label);
 
   final String label;
 }
@@ -73,8 +84,10 @@ class _HomePageState extends State<HomePage> {
     null => const StudentProfile(),
   };
   final _social = SocialGraph();
+  final _homeScroll = ScrollController();
+  final _homeSearch = TextEditingController();
   String _query = '';
-  bool _followingOnly = false;
+  _EventDiscovery _discovery = _EventDiscovery.all;
   _SearchScope _scope = _SearchScope.all;
   int _selectedIndex = 0;
 
@@ -84,6 +97,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _toggleRsvp(ClubEvent event) {
+    final current = _events[event.id] ?? event;
+    if (_rsvps.visibilityFor(event.id) == null &&
+        !current.canRsvpAt(DateTime.now())) {
+      return;
+    }
     _changeClubState(() => _rsvps.toggle(event.id, _rsvpVisibility.value));
   }
 
@@ -198,6 +216,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     unawaited(_publications?.cancel());
+    _homeScroll.dispose();
+    _homeSearch.dispose();
     _clubRevision.dispose();
     _rsvpVisibility.dispose();
     _profileVisibility.dispose();
@@ -224,8 +244,9 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _browseClubs() => _openLivePage(
+  void _browseClubs({String query = ''}) => _openLivePage(
     () => ClubDirectoryPage(
+      initialQuery: query,
       followedIds: _clubProfile.followedClubIds,
       onFollow: _toggleFollow,
       onOpen: _openClub,
@@ -294,47 +315,76 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openClub(ClubOrganization club) => _openLivePage(() {
-    final now = DateTime.now();
+    final schedule = ClubEventSchedule(_events.values, club.id, DateTime.now());
+    List<Widget> cards(Iterable<ClubEvent> events) => [
+      for (final event in events) _eventCard(event, insideClub: true),
+    ];
     return ClubDetailPage(
       club: club,
       following: _clubProfile.followedClubIds.contains(club.id),
       notifications: _clubProfile.clubNotificationOptIns.containsKey(club.id),
       onFollow: () => _toggleFollow(club.id),
       onNotifications: (value) => _setNotifications(club.id, value),
-      eventCards: [
-        for (final event in _events.values)
-          if (event.clubId == club.id &&
-              !event.cancelled &&
-              (event.startsAt?.isAfter(now) ?? false) &&
-              (event.publishedAt?.isAfter(now) == false))
-            _eventCard(event, linkClub: false),
-      ],
+      upcoming: cards(schedule.upcoming),
+      past: cards(schedule.past.take(5)),
+      undated: cards(schedule.undated),
+      cancelled: cards(schedule.cancelled),
+    );
+  });
+
+  void _openEvent(ClubEvent event) => _openLivePage(() {
+    final current = _events[event.id] ?? event;
+    final description = current.description?.trim();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Event details')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            _eventCard(current),
+            if (description != null && description.isNotEmpty)
+              Text(description),
+          ],
+        ),
+      ),
     );
   });
 
   Widget _eventCard(
     ClubEvent event, {
-    bool linkClub = true,
+    bool insideClub = false,
     StudentVisibility? visibility,
-  }) => _EventCard(
-    event: event,
-    isGoing: _rsvps.visibilityFor(event.id) != null,
-    visibility: visibility,
-    recommended: event.isFrosh && _profile.isFroshie,
-    onRsvp: () => _toggleRsvp(event),
-    onOpenClub: linkClub && clubsById.containsKey(event.clubId)
-        ? () => _openClubById(event.clubId)
-        : null,
-  );
+    ClubFeedEntry? feedEntry,
+  }) {
+    final now = DateTime.now();
+    return _EventCard(
+      event: event,
+      isGoing: _rsvps.visibilityFor(event.id) != null,
+      visibility: visibility,
+      recommended: event.isFrosh && _profile.isFroshie,
+      canRsvp: event.canRsvpAt(now),
+      upcoming: event.isUpcomingAt(now),
+      feedEntry: feedEntry,
+      previewLabel: _query.isEmpty ? 'Next event' : 'Matching event',
+      onRsvp: () => _toggleRsvp(event),
+      showOrganizer: !insideClub,
+      onOpenDetails: insideClub ? () => _openEvent(event) : null,
+      onOpenClub: !insideClub && clubsById.containsKey(event.clubId)
+          ? () => _openClubById(event.clubId)
+          : null,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final matchingEvents = _events.values.where(
-      (event) =>
-          event.matches(_query) &&
-          (!_followingOnly ||
-              _clubProfile.followedClubIds.contains(event.clubId)),
+    final matchingEvents = buildClubEventFeed(
+      _events.values,
+      now: DateTime.now(),
+      query: _query,
+      followedOnly: _discovery == _EventDiscovery.following
+          ? _clubProfile.followedClubIds
+          : null,
     );
     final going = [
       for (final decision in _rsvps.decisions)
@@ -372,19 +422,27 @@ class _HomePageState extends State<HomePage> {
           index: _selectedIndex,
           children: [
             ListView(
+              controller: _homeScroll,
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
                 Text('Find club events', style: text.headlineMedium),
                 const SizedBox(height: 16),
                 SearchBar(
+                  controller: _homeSearch,
                   hintText: 'Search events, clubs or McGillians',
                   leading: const Icon(Icons.search_rounded),
                   padding: const WidgetStatePropertyAll(
                     EdgeInsets.symmetric(horizontal: 16),
                   ),
                   onChanged: (value) {
-                    setState(() => _query = value.trim().toLowerCase());
+                    setState(() {
+                      _query = value.trim().toLowerCase();
+                      if (_query.isNotEmpty &&
+                          _discovery == _EventDiscovery.discover) {
+                        _discovery = _EventDiscovery.all;
+                      }
+                    });
                   },
                 ),
                 const SizedBox(height: 12),
@@ -404,66 +462,70 @@ class _HomePageState extends State<HomePage> {
                 if (_scope == _SearchScope.mcgillians ||
                     (_scope == _SearchScope.all && _query.isNotEmpty))
                   ..._mcgillianResults(text),
+                if (_scope == _SearchScope.all && _query.isNotEmpty)
+                  ..._clubSearchResults(text),
                 if (_scope != _SearchScope.mcgillians) ...[
-                  const SizedBox(height: 16),
-                  SuggestedClubs(
-                    faculty: _profile.faculty,
-                    major: _profile.major,
-                    interests: _profile.interests,
-                    followedClubIds: _clubProfile.followedClubIds,
-                    onFollow: _toggleFollow,
-                    onOpen: _openClub,
-                    onBrowse: _browseClubs,
-                  ),
                   const SizedBox(height: 24),
                   Text('Club events', style: text.titleLarge),
-                  Text('Sample events', style: text.bodySmall),
-                  if (widget.profile != null) ...[
-                    const SizedBox(height: 8),
-                    Text('${_profile.major} · ${_profile.faculty}'),
-                    if (_profile.interests.isEmpty)
-                      Text(
-                        'Showing events for ${_profile.year} '
-                        '${_profile.faculty} students and popular campus '
-                        'events. Add interests later from Edit Profile.',
-                      )
-                    else
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          for (final interest in _profile.interests)
-                            Chip(label: Text(interest)),
-                        ],
-                      ),
-                  ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     children: [
-                      ChoiceChip(
-                        label: const Text('All Events'),
-                        selected: !_followingOnly,
-                        onSelected: (_) =>
-                            setState(() => _followingOnly = false),
-                      ),
-                      ChoiceChip(
-                        label: const Text('Following'),
-                        selected: _followingOnly,
-                        onSelected: (_) =>
-                            setState(() => _followingOnly = true),
-                      ),
+                      for (final mode in _EventDiscovery.values)
+                        ChoiceChip(
+                          label: Text(mode.label),
+                          selected: _discovery == mode,
+                          onSelected: (_) => setState(() => _discovery = mode),
+                        ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  if (_followingOnly && _clubProfile.followedClubIds.isEmpty)
-                    const Text('Follow clubs to see their events here.')
-                  else if (matchingEvents.isEmpty)
-                    Text(
-                      _followingOnly
-                          ? 'No events from your followed clubs match right now.'
-                          : 'No club events match your search.',
+                  Visibility(
+                    visible: _discovery == _EventDiscovery.discover,
+                    maintainState: true,
+                    child: SuggestedClubs(
+                      faculty: _profile.faculty,
+                      major: _profile.major,
+                      interests: _profile.interests,
+                      followedClubIds: _clubProfile.followedClubIds,
+                      onFollow: _toggleFollow,
+                      onOpen: _openClub,
+                      onBrowse: _browseClubs,
                     ),
-                  for (final event in matchingEvents) _eventCard(event),
+                  ),
+                  if (_discovery != _EventDiscovery.discover) ...[
+                    const SizedBox(height: 8),
+                    Text('Sample events', style: text.bodySmall),
+                    if (widget.profile != null) ...[
+                      const SizedBox(height: 8),
+                      Text('${_profile.major} · ${_profile.faculty}'),
+                      if (_profile.interests.isEmpty)
+                        Text(
+                          'Showing events for ${_profile.year} '
+                          '${_profile.faculty} students and popular campus '
+                          'events. Add interests later from Edit Profile.',
+                        )
+                      else
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final interest in _profile.interests)
+                              Chip(label: Text(interest)),
+                          ],
+                        ),
+                    ],
+                    const SizedBox(height: 12),
+                    if (_discovery == _EventDiscovery.following &&
+                        _clubProfile.followedClubIds.isEmpty)
+                      const Text('Follow clubs to see their events here.')
+                    else if (matchingEvents.isEmpty)
+                      Text(
+                        _discovery == _EventDiscovery.following
+                            ? 'No events from your followed clubs match right now.'
+                            : 'No club events match your search.',
+                      ),
+                    for (final entry in matchingEvents)
+                      _eventCard(entry.event, feedEntry: entry),
+                  ],
                 ],
               ],
             ),
@@ -602,8 +664,50 @@ class _HomePageState extends State<HomePage> {
     ];
   }
 
+  List<Widget> _clubSearchResults(TextTheme text) {
+    final query = normalizeClubSearch(_query);
+    if (query.isEmpty) return const [];
+    final matches = searchClubCatalog(query);
+    if (matches.isEmpty) return const [];
+
+    const previewSize = 5;
+    return [
+      const SizedBox(height: 24),
+      Text('Clubs & organizations', style: text.titleLarge),
+      for (final club in matches.take(previewSize))
+        ClubRow(
+          key: ValueKey(club.id),
+          club: club,
+          compact: true,
+          following: _clubProfile.followedClubIds.contains(club.id),
+          onOpen: () => _openClub(club),
+          onFollow: () => _toggleFollow(club.id),
+        ),
+      if (matches.length > previewSize)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () => _browseClubs(query: _homeSearch.text),
+            child: Text('See all ${matches.length} organizations'),
+          ),
+        ),
+    ];
+  }
+
   void _selectDestination(int index) {
     FocusScope.of(context).unfocus();
+    if (index == _selectedIndex) {
+      if (index == 0 && _homeScroll.hasClients) {
+        unawaited(
+          _homeScroll.animateTo(
+            _homeScroll.position.minScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      }
+      return;
+    }
     setState(() => _selectedIndex = index);
   }
 }
@@ -645,13 +749,25 @@ class _EventCard extends StatelessWidget {
     required this.event,
     required this.isGoing,
     required this.onRsvp,
+    required this.canRsvp,
+    required this.upcoming,
+    required this.previewLabel,
+    required this.showOrganizer,
+    this.feedEntry,
     this.visibility,
+    this.onOpenDetails,
     this.recommended = false,
     this.onOpenClub,
   });
 
   final ClubEvent event;
   final bool isGoing;
+  final bool canRsvp;
+  final bool upcoming;
+  final bool showOrganizer;
+  final String previewLabel;
+  final ClubFeedEntry? feedEntry;
+  final VoidCallback? onOpenDetails;
   final StudentVisibility? visibility;
   final VoidCallback onRsvp;
   final VoidCallback? onOpenClub;
@@ -662,6 +778,14 @@ class _EventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final club = feedEntry?.club;
+    final more = feedEntry?.additionalEvents ?? 0;
+    final localizations = MaterialLocalizations.of(context);
+    final start = event.startsAt?.toLocal();
+    final schedule = start == null
+        ? event.schedule
+        : '${localizations.formatFullDate(start)} · '
+              '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(start))}';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -669,6 +793,16 @@ class _EventCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (club != null) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(child: Icon(Icons.groups_outlined)),
+                title: Text(club.name, style: text.titleLarge),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onOpenClub,
+              ),
+              if (upcoming) Text(previewLabel, style: text.bodySmall),
+            ],
             if (event.isFrosh) ...[
               Wrap(
                 spacing: 8,
@@ -682,23 +816,49 @@ class _EventCard extends StatelessWidget {
               const SizedBox(height: 8),
             ],
             Text(event.title, style: text.titleMedium),
-            if (onOpenClub == null)
-              Text(event.club, style: text.bodySmall)
-            else
-              TextButton(onPressed: onOpenClub, child: Text(event.club)),
+            if (club == null && showOrganizer && event.club.isNotEmpty)
+              if (onOpenClub == null)
+                Text(event.club, style: text.bodySmall)
+              else
+                TextButton(onPressed: onOpenClub, child: Text(event.club)),
             const SizedBox(height: 4),
-            Text(event.schedule, style: text.bodySmall),
-            Text(event.location, style: text.bodySmall),
+            if (schedule.isNotEmpty) Text(schedule, style: text.bodySmall),
+            if (event.location.isNotEmpty)
+              Text(event.location, style: text.bodySmall),
+            if (event.cancelled)
+              const Text('Cancelled')
+            else if (start == null)
+              Text('Schedule unconfirmed', style: text.bodySmall)
+            else if (!upcoming)
+              const Text('Past event'),
             if (visibility case final audience?)
               Text('Going · Demo visibility: ${audience.label}'),
+            if (more > 0)
+              Text('$more more from this club', style: text.bodySmall),
             const SizedBox(height: 8),
-            if (isGoing)
-              OutlinedButton(
-                onPressed: onRsvp,
-                child: const Text('Cancel RSVP'),
-              )
-            else
-              FilledButton(onPressed: onRsvp, child: const Text('RSVP')),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (isGoing)
+                  OutlinedButton(
+                    onPressed: onRsvp,
+                    child: const Text('Cancel RSVP'),
+                  )
+                else if (canRsvp)
+                  FilledButton(onPressed: onRsvp, child: const Text('RSVP')),
+                if (club != null)
+                  TextButton(
+                    onPressed: onOpenClub,
+                    child: const Text('View club events'),
+                  ),
+                if (onOpenDetails != null)
+                  TextButton(
+                    onPressed: onOpenDetails,
+                    child: const Text('Event details'),
+                  ),
+              ],
+            ),
           ],
         ),
       ),

@@ -27,6 +27,36 @@ void main() {
     );
   });
 
+  test('verified first-year organizations have distinct IDs and searchable aliases', () {
+    const groups = {
+      'SSMU FYC': 'ssmu-first-year-council',
+      'Engineering Junior Council': 'eus-junior-council',
+      'AUS FEARC': 'aus-fearc',
+      'SUS First-Year Council': 'sus-fuss',
+      'CSUS FYC': 'csus-first-year-council',
+      'ECSESS Bits': 'ecsess-bits',
+      'BUSS FYC': 'buss-first-year-council',
+      'MAME FYC': 'mame-first-year-council',
+      'MUS FIT': 'mus-first-year-involvement-team',
+      'EdUS FYRE': 'edus-fyre',
+      'PSSA FYC': 'pssa-first-year-council',
+    };
+    for (final entry in groups.entries) {
+      final matches = searchClubCatalog(entry.key);
+      final match = matches.first;
+      expect(match.id, entry.value, reason: entry.key);
+      expect(matches.where((club) => club.id == entry.value), hasLength(1));
+      expect(
+        match.type,
+        isIn([
+          OrganizationType.firstYearCouncil,
+          OrganizationType.firstYearCommittee,
+          OrganizationType.firstYearSociety,
+        ]),
+      );
+    }
+  });
+
   test('only new eligible events RSVP, privately and once per event ID', () {
     final now = DateTime.utc(2026, 11, 21, 12);
     final enabledAt = now.subtract(const Duration(hours: 1));

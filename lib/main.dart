@@ -1,121 +1,126 @@
-import 'package:material_ui/material_ui.dart';
+import 'dart:async';
 
-void main() {
-  runApp(const MyApp());
+import 'package:material_ui/material_ui.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'pages/home_page.dart';
+import 'pages/login_page.dart';
+
+const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const _supabasePublishableKey = String.fromEnvironment(
+  'SUPABASE_PUBLISHABLE_KEY',
+);
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (_supabaseUrl.isNotEmpty && _supabasePublishableKey.isNotEmpty) {
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      publishableKey: _supabasePublishableKey,
+    );
+  }
+
+  runApp(const McMapApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class McMapApp extends StatelessWidget {
+  const McMapApp({super.key});
 
-  // This widget is the root of your application.
+  bool get _isConfigured =>
+      _supabaseUrl.isNotEmpty && _supabasePublishableKey.isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'McMap',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below toq Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1F5A75)),
       ),
-      home: const MyHomePage(title: 'McMap'),
+      home: _isConfigured ? const AuthGate() : const ConfigurationPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<AuthGate> createState() => _AuthGateState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _AuthGateState extends State<AuthGate> {
+  late final StreamSubscription<AuthState> _authSubscription;
+  User? _user;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter += 1;
+  @override
+  void initState() {
+    super.initState();
+    _user = Supabase.instance.client.auth.currentUser;
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
+      state,
+    ) {
+      if (mounted) {
+        setState(() => _user = state.session?.user);
+      }
     });
   }
 
   @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final user = _user;
+    if (user == null) return const LoginPage();
+    return HomePage(user: user);
+  }
+}
+
+class ConfigurationPage extends StatelessWidget {
+  const ConfigurationPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('Your GPA:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Supabase configuration required',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Run the app with SUPABASE_URL and '
+                      'SUPABASE_PUBLISHABLE_KEY passed using --dart-define.',
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
+          ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
       ),
     );
   }

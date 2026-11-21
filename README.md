@@ -1,18 +1,26 @@
 # McMap
 
-A Flutter app with Microsoft authentication powered by Supabase.
+A Flutter app with McGill email/password authentication powered by Supabase.
+
+## Authentication behavior
+
+- Only addresses ending in `@mcgill.ca` or a subdomain such as `@mail.mcgill.ca` are accepted.
+- The app first asks for the McGill email on a separate scene.
+- Existing accounts show a login password scene.
+- New addresses show an account-creation onboarding scene.
+- Supabase email confirmation settings determine whether the user can enter immediately or must confirm the address first.
+
+The login checkbox selects whether the app presents confirmation-required behavior for the new account flow. Supabase itself controls whether email confirmation is enforced in Authentication → Providers → Email: Enable email confirmations. Disabling that server setting allows new sign-ups to receive an immediate session.
 
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Enable the Microsoft/Azure auth provider and enter the Microsoft Entra application client ID and secret.
-3. In Supabase, open **Authentication → URL Configuration**.
-4. Add `io.mcmap.app://login-callback` to **Additional Redirect URLs**.
-5. Add your web local and production origins. For example:
-   - `http://localhost:3000/**`
-   - `https://your-domain.example/**`
+2. Apply `supabase/migrations/20261121000000_create_account_lookup.sql` through the Supabase SQL editor or migrations CLI.
+3. Enable email/password authentication in **Authentication → Providers**.
+4. In **Authentication → URL Configuration**, configure the Site URL and redirect URLs if email confirmation is enabled.
+5. Optionally disable email confirmation for immediate account login during development.
 
-Then run the app with compile-time credentials:
+Run the app with compile-time credentials:
 
 ```bash
 flutter run -d chrome \
@@ -20,26 +28,7 @@ flutter run -d chrome \
   --dart-define=SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 ```
 
-Use the same options for Android, iOS, or Linux:
-
-```bash
-flutter run -d linux \
-  --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
-  --dart-define=SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
-```
-
 Never use or commit a Supabase service-role key. The publishable/anon key is intended for client applications.
-
-## Microsoft setup
-
-In Microsoft Entra ID, register a web application and add the Supabase callback URL supplied by the Supabase Microsoft provider settings. Add any required Microsoft redirect URLs to Supabase after the provider is enabled.
-
-Native Android and iOS builds use `io.mcmap.app://login-callback`. The schemes are registered in:
-
-- `android/app/src/main/AndroidManifest.xml`
-- `ios/Runner/Info.plist`
-
-Web authentication uses the current web origin and should therefore be allowlisted in Supabase URL configuration.
 
 ## Development
 

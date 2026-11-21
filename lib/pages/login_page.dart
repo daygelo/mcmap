@@ -1,6 +1,25 @@
-import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+bool isMcGillEmail(String email) {
+  final normalized = email.trim().toLowerCase();
+  final parts = normalized.split('@');
+  if (parts.length != 2) return false;
+
+  final domain = parts.last;
+  return domain == 'mcgill.ca' || domain.endsWith('.mcgill.ca');
+}
+
+String defaultNameFromEmail(String email) {
+  final localPart = email.trim().split('@').first;
+  final words = localPart
+      .split(RegExp(r'[._+-]'))
+      .where((word) => word.isNotEmpty)
+      .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+      .toList();
+
+  return words.isEmpty ? 'McGill Student' : words.join(' ');
+}
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -10,37 +29,57 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  final _emailController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  String? _error;
+  bool _requireEmailConfirmation = true;
 
-  Future<void> _signInWithMicrosoft() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    final email = _emailController.text.trim().toLowerCase();
 
     try {
-      final redirectTo = kIsWeb
-          ? null
-          : 'io.mcmap.app://login-callback';
-
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.azure,
-        redirectTo: redirectTo,
-        queryParams: const {'prompt': 'select_account'},
+      final exists = await Supabase.instance.client.rpc(
+        'mcgill_account_exists',
+        params: {'p_email': email},
       );
-    } on AuthException catch (error) {
+
+      if (!mounted) return;
+      if (exists == true) {
+        Navigator.of(context).pushNamed('/welcome-back', arguments: email);
+      } else {
+        Navigator.of(context).pushNamed(
+          '/onboarding',
+          arguments: {
+            'email': email,
+            'requireEmailConfirmation': _requireEmailConfirmation,
+          },
+        );
+      }
+    } on PostgrestException catch (error) {
       if (mounted) {
-        setState(() => _error = error.message);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
       }
     } catch (_) {
       if (mounted) {
-        setState(() => _error = 'Could not start Microsoft sign-in.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not check this email. Please try again.'),
+          ),
+        );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -54,10 +93,7 @@ class _LoginPageState extends State<LoginPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              colorScheme.primaryContainer,
-              colorScheme.surface,
-            ],
+            colors: [colorScheme.primaryContainer, colorScheme.surface],
           ),
         ),
         child: SafeArea(
@@ -70,55 +106,89 @@ class _LoginPageState extends State<LoginPage> {
                   elevation: 2,
                   child: Padding(
                     padding: const EdgeInsets.all(28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Icon(Icons.map_rounded,
-                            size: 56, color: colorScheme.primary),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Welcome to McMap',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Sign in with your Microsoft account to continue.',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 28),
-                        if (_error != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              _error!,
-                              style: TextStyle(color: colorScheme.error),
-                              textAlign: TextAlign.center,
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Icon(
+                            Icons.map_rounded,
+                            size: 56,
+                            color: colorScheme.primary,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Welcome to McMap',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Enter your McGill email to continue.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 28),
+                          TextFormField(
+                            key: const Key('email-field'),
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.done,
+                            autofillHints: const [AutofillHints.email],
+                            onFieldSubmitted: (_) => _submit(),
+                            decoration: const InputDecoration(
+                              labelText: 'McGill email',
+                              hintText: 'name@mail.mcgill.ca',
+                              prefixIcon: Icon(Icons.email_outlined),
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (value) {
+                              final email = value?.trim() ?? '';
+                              if (email.isEmpty) {
+                                return 'Enter your McGill email';
+                              }
+                              if (!isMcGillEmail(email)) {
+                                return 'Use an email ending in @mcgill.ca or a McGill subdomain';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          CheckboxListTile(
+                            key: const Key('email-confirmation-checkbox'),
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: _requireEmailConfirmation,
+                            onChanged: (value) {
+                              setState(() {
+                                _requireEmailConfirmation = value ?? true;
+                              });
+                            },
+                            title: const Text('Require email confirmation'),
+                            subtitle: const Text(
+                              'Disable this to allow account creation without a confirmation email.',
                             ),
                           ),
-                        FilledButton.icon(
-                          onPressed:
-                              _isLoading ? null : _signInWithMicrosoft,
-                          icon: _isLoading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.login_rounded),
-                          label: Text(
-                            _isLoading
-                                ? 'Opening Microsoft…'
-                                : 'Continue with Microsoft',
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: _isLoading ? null : _submit,
+                            icon: _isLoading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.arrow_forward_rounded),
+                            label: Text(_isLoading ? 'Checking…' : 'Continue'),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(52),
+                            ),
                           ),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(52),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

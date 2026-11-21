@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
+import 'pages/onboarding_page.dart';
+import 'pages/welcome_back_page.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -40,6 +42,55 @@ class McMapApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1F5A75)),
       ),
       home: _isConfigured ? const AuthGate() : const ConfigurationPage(),
+      onGenerateRoute: (settings) {
+        if (settings.name == '/welcome-back') {
+          final email = settings.arguments is String
+              ? settings.arguments as String
+              : null;
+          if (email == null || email.isEmpty) {
+            return MaterialPageRoute<void>(
+              builder: (_) => const LoginPage(),
+              settings: const RouteSettings(name: '/login'),
+            );
+          }
+          return MaterialPageRoute<void>(
+            builder: (_) => WelcomeBackPage(email: email),
+            settings: settings,
+          );
+        }
+
+        if (settings.name == '/onboarding') {
+          final arguments = settings.arguments;
+          final email = arguments is Map<String, Object?>
+              ? arguments['email'] as String?
+              : null;
+          final requireEmailConfirmation = arguments is Map<String, Object?>
+              ? arguments['requireEmailConfirmation'] == true
+              : true;
+          if (email == null || email.isEmpty) {
+            return MaterialPageRoute<void>(
+              builder: (_) => const LoginPage(),
+              settings: const RouteSettings(name: '/login'),
+            );
+          }
+          return MaterialPageRoute<void>(
+            builder: (_) => OnboardingPage(
+              email: email,
+              requireEmailConfirmation: requireEmailConfirmation,
+            ),
+            settings: settings,
+          );
+        }
+
+        if (settings.name == '/login') {
+          return MaterialPageRoute<void>(
+            builder: (_) => const LoginPage(),
+            settings: settings,
+          );
+        }
+
+        return null;
+      },
     );
   }
 }

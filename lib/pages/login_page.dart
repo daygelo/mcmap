@@ -1,6 +1,7 @@
-import 'package:flutter/foundation.dart';
+r
 import 'package:material_ui/material_ui.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'onboarding/academic_info_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -11,42 +12,23 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
-  String? _error;
 
   Future<void> _signInWithMicrosoft() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+    setState(() => _isLoading = true);
 
-    try {
-      final redirectTo = kIsWeb
-          ? null
-          : 'io.mcmap.app://login-callback';
+    // TODO(auth): call the real Microsoft sign-in here and only continue
+    // when it succeeds. For now we skip straight to onboarding.
 
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.azure,
-        redirectTo: redirectTo,
-        queryParams: const {'prompt': 'select_account'},
-      );
-    } on AuthException catch (error) {
-      if (mounted) {
-        setState(() => _error = error.message);
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error = 'Could not start Microsoft sign-in.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const AcademicInfoPage()));
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       body: Container(
@@ -54,10 +36,7 @@ class _LoginPageState extends State<LoginPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              colorScheme.primaryContainer,
-              colorScheme.surface,
-            ],
+            colors: [colorScheme.primaryContainer, colorScheme.surface],
           ),
         ),
         child: SafeArea(
@@ -74,44 +53,38 @@ class _LoginPageState extends State<LoginPage> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Icon(Icons.map_rounded,
-                            size: 56, color: colorScheme.primary),
+                        Icon(
+                          Icons.map_rounded,
+                          size: 56,
+                          color: colorScheme.primary,
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           'Welcome to McMap',
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineMedium,
+                          style: theme.textTheme.headlineMedium,
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'Sign in with your Microsoft account to continue.',
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyLarge,
+                          style: theme.textTheme.bodyLarge,
                         ),
                         const SizedBox(height: 28),
-                        if (_error != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              _error!,
-                              style: TextStyle(color: colorScheme.error),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
                         FilledButton.icon(
-                          onPressed:
-                              _isLoading ? null : _signInWithMicrosoft,
+                          onPressed: _isLoading ? null : _signInWithMicrosoft,
                           icon: _isLoading
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Icon(Icons.login_rounded),
                           label: Text(
                             _isLoading
-                                ? 'Opening Microsoft…'
+                                ? 'Signing in…'
                                 : 'Continue with Microsoft',
                           ),
                           style: FilledButton.styleFrom(

@@ -88,6 +88,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
           interests: Set.unmodifiable(_interests),
           avatarUrl: _photo.avatarUrl,
           avatarBytes: _photo.avatarBytes,
+          handle: widget.profile.handle,
         ),
       );
     } catch (_) {

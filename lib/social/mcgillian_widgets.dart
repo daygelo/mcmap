@@ -106,6 +106,11 @@ class McGillianAvatar extends StatelessWidget {
       radius: radius,
       backgroundColor: McMapColors.redTint,
       foregroundColor: McMapColors.redStrong,
+      foregroundImage: switch (student.avatarUrl) {
+        final url? => NetworkImage(url),
+        null => null,
+      },
+      onForegroundImageError: student.avatarUrl == null ? null : (_, _) {},
       child: Text(
         student.initials,
         style: TextStyle(

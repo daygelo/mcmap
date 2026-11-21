@@ -50,6 +50,10 @@ class EventDetailsPage extends StatelessWidget {
                   children: [
                     InitialsAvatar(
                       name: event.club,
+                      image: switch (event.clubAvatarUrl) {
+                        final url? => NetworkImage(url),
+                        null => null,
+                      },
                       onTap: onOpenClub,
                       semanticLabel: 'Open ${event.club} page',
                     ),

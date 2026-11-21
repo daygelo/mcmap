@@ -12,6 +12,19 @@ class LocalRsvps {
 
   StudentVisibility? visibilityFor(String eventId) => _decisions[eventId];
 
+  /// Replaces everything with RSVPs loaded from the server.
+  void restore(Map<String, StudentVisibility> saved) {
+    _decisions
+      ..clear()
+      ..addAll(saved);
+  }
+
+  /// Puts back a decision after a failed save.
+  void set(String eventId, StudentVisibility? visibility) {
+    _decisions.remove(eventId);
+    _decisions[eventId] = visibility;
+  }
+
   void toggle(String eventId, StudentVisibility visibility) {
     final previous = _decisions.remove(eventId);
     _decisions[eventId] = previous == null ? visibility : null;

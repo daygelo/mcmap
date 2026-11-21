@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:material_ui/material_ui.dart';
 
+import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
@@ -47,9 +50,22 @@ enum _EventDiscovery {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.profile, this.publications});
+  const HomePage({
+    super.key,
+    this.profile,
+    this.publications,
+    this.account,
+    this.backend,
+  });
 
   final UserProfile? profile;
+
+  /// Name, handle, photo and bio from `profiles` (signed-in only).
+  final AccountProfile? account;
+
+  /// Loads events, RSVPs and McGillians from the server and saves changes.
+  /// Null = offline demo with sample data.
+  final McMapBackend? backend;
 
   /// Optional prototype publication input. Production delivery is server-side.
   final Stream<ClubEvent>? publications;
@@ -59,7 +75,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _events = {for (final event in _sampleEvents) event.id: event};
+  late final Map<String, ClubEvent> _events = {
+    if (widget.backend == null)
+      for (final event in _sampleEvents) event.id: event,
+  };
+  bool _loadingEvents = false;
   final _rsvps = LocalRsvps();
   final _clubUpdates = <String, ClubEvent>{};
   final _clubRevision = ValueNotifier(0);
@@ -79,15 +99,25 @@ class _HomePageState extends State<HomePage> {
   final _profileVisibility = ValueNotifier(StudentVisibility.private);
   late StudentProfile _profile = switch (widget.profile) {
     final profile? => StudentProfile(
+      name: switch (widget.account?.fullName.trim()) {
+        final name? when name.isNotEmpty => name,
+        _ => 'McMap Student',
+      },
       faculty: profile.faculty,
       major: profile.major ?? 'Program not specified',
       year: profile.standing,
       firstYearAtMcGill: profile.firstYearAtMcGill,
       interests: Set.unmodifiable(profile.interests),
+      bio: widget.account?.bio ?? '',
+      avatarUrl: widget.account?.avatarUrl,
+      handle: widget.account?.handle,
     ),
     null => const StudentProfile(),
   };
-  final _social = SocialGraph();
+  late final SocialGraph _social = switch (widget.backend) {
+    final backend? => SocialGraph.remote(backend),
+    null => SocialGraph(),
+  };
   final _homeScroll = ScrollController();
   final _homeSearch = TextEditingController();
   final _searchFocus = FocusNode();
@@ -124,7 +154,17 @@ class _HomePageState extends State<HomePage> {
         !current.canRsvpAt(DateTime.now())) {
       return;
     }
+    final previous = _rsvps.visibilityFor(event.id);
     _changeClubState(() => _rsvps.toggle(event.id, _rsvpVisibility.value));
+    final backend = widget.backend;
+    if (backend == null) return;
+    backend.setRsvp(event.id, _rsvps.visibilityFor(event.id)).catchError((
+      Object _,
+    ) {
+      if (!mounted) return;
+      _changeClubState(() => _rsvps.set(event.id, previous));
+      _showError("Couldn't save your RSVP. Try again.");
+    });
   }
 
   Future<void> _editClubs() async {
@@ -201,7 +241,84 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _searchFocus.addListener(_onSearchFocusChanged);
+    _social.onError = (_) {
+      _showError("Couldn't update your McGillians.");
+    };
+    _social.addListener(_onSocialChanged);
     _listenForPublications();
+    if (widget.backend != null) unawaited(_loadFromServer());
+  }
+
+  /// Search results for McGillians arrive asynchronously.
+  void _onSocialChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadFromServer() async {
+    final backend = widget.backend!;
+    setState(() => _loadingEvents = true);
+    try {
+      final (events, rsvps) = await (
+        backend.fetchEvents(),
+        backend.fetchMyRsvps(),
+        _social.load(),
+      ).wait.then((r) => (r.$1, r.$2));
+      if (!mounted) return;
+      _changeClubState(() {
+        _events
+          ..clear()
+          ..addEntries(events.map((e) => MapEntry(e.id, e)));
+        _rsvps.restore(rsvps);
+        _loadingEvents = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadingEvents = false);
+      _showError("Couldn't load events. Pull to refresh or try again later.");
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _changePhoto(Uint8List? bytes) async {
+    final backend = widget.backend;
+    // Instant preview; the server copy follows.
+    _changeClubState(() => _profile = _profile.withPhoto(bytes));
+    if (backend == null) return;
+    try {
+      if (bytes == null) {
+        await backend.removeAvatar();
+      } else {
+        final url = await backend.uploadAvatar(bytes);
+        if (!mounted) return;
+        _changeClubState(
+          () => _profile = _profile.withPhotoUrl(url, preview: bytes),
+        );
+      }
+    } catch (error) {
+      _showError("Couldn't save your photo. Try again.");
+    }
+  }
+
+  Future<void> _saveProfile(StudentProfile profile) async {
+    final backend = widget.backend;
+    if (backend != null) {
+      await backend.updateProfile(profile);
+      final bytes = profile.avatarBytes;
+      if (bytes != null && bytes != _profile.avatarBytes) {
+        profile = profile.withPhotoUrl(
+          await backend.uploadAvatar(bytes),
+          preview: bytes,
+        );
+      } else if (!profile.hasPhoto && _profile.hasPhoto) {
+        await backend.removeAvatar();
+      }
+    }
+    if (mounted) _changeClubState(() => _profile = profile);
   }
 
   @override
@@ -245,7 +362,9 @@ class _HomePageState extends State<HomePage> {
     _clubRevision.dispose();
     _rsvpVisibility.dispose();
     _profileVisibility.dispose();
-    _social.dispose();
+    _social
+      ..removeListener(_onSocialChanged)
+      ..dispose();
     super.dispose();
   }
 
@@ -448,6 +567,12 @@ class _HomePageState extends State<HomePage> {
             ),
             icon: const Icon(Icons.settings_outlined),
           ),
+          if (widget.backend case final backend?)
+            IconButton(
+              tooltip: 'Sign out',
+              onPressed: backend.signOut,
+              icon: const Icon(Icons.logout_rounded),
+            ),
           const SizedBox(width: 8),
         ],
       ),
@@ -552,7 +677,8 @@ class _HomePageState extends State<HomePage> {
                   ),
                   if (_discovery != _EventDiscovery.discover) ...[
                     const SizedBox(height: 8),
-                    Text('Sample events', style: text.bodySmall),
+                    if (widget.backend == null)
+                      Text('Sample events', style: text.bodySmall),
                     if (widget.profile != null) ...[
                       const SizedBox(height: 8),
                       Text('${_profile.major} · ${_profile.faculty}'),
@@ -572,7 +698,12 @@ class _HomePageState extends State<HomePage> {
                         ),
                     ],
                     const SizedBox(height: 12),
-                    if (_discovery == _EventDiscovery.following &&
+                    if (_loadingEvents)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (_discovery == _EventDiscovery.following &&
                         _clubProfile.followedClubIds.isEmpty)
                       const Text('Follow clubs to see their events here.')
                     else if (matchingEvents.isEmpty)
@@ -598,9 +729,7 @@ class _HomePageState extends State<HomePage> {
                   listenable: _social,
                   builder: (context, _) => ProfileHeader(
                     profile: _profile,
-                    onPhotoChanged: (bytes) => _changeClubState(
-                      () => _profile = _profile.withPhoto(bytes),
-                    ),
+                    onPhotoChanged: _changePhoto,
                     mcgilliansCount: _social.connections.length,
                     onMcGilliansTap: () =>
                         showMcGilliansSheet(context, _social),
@@ -611,11 +740,7 @@ class _HomePageState extends State<HomePage> {
                     }.length,
                     onEdit: () => _openPage(
                       context,
-                      EditProfilePage(
-                        profile: _profile,
-                        onSave: (profile) async =>
-                            _changeClubState(() => _profile = profile),
-                      ),
+                      EditProfilePage(profile: _profile, onSave: _saveProfile),
                     ),
                   ),
                 ),
@@ -902,6 +1027,10 @@ class _EventCard extends StatelessWidget {
                   children: [
                     InitialsAvatar(
                       name: clubName,
+                      image: switch (event.clubAvatarUrl) {
+                        final url? => NetworkImage(url),
+                        null => null,
+                      },
                       onTap: onOpenClub,
                       semanticLabel: 'Open $clubName page',
                     ),

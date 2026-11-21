@@ -1,18 +1,55 @@
 # McMap
 
-A Flutter app with Microsoft authentication powered by Supabase.
+A Flutter app with McGill email/password authentication powered by Supabase.
+
+## Authentication behavior
+
+- Only addresses ending in `@mcgill.ca` or a subdomain such as `@mail.mcgill.ca` are accepted.
+- The app first asks for the McGill email on a separate scene.
+- Existing accounts show a login password scene.
+- New addresses show an account-creation onboarding scene.
+- Supabase email confirmation settings determine whether a newly created user can enter immediately or must confirm the address first.
 
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Enable the Microsoft/Azure auth provider and enter the Microsoft Entra application client ID and secret.
-3. In Supabase, open **Authentication → URL Configuration**.
-4. Add `io.mcmap.app://login-callback` to **Additional Redirect URLs**.
-5. Add your web local and production origins. For example:
-   - `http://localhost:3000/**`
-   - `https://your-domain.example/**`
+2. Apply the migrations in order, with `supabase db push` or by pasting each
+   file into the SQL editor:
+   - `supabase/migrations/20261121000000_create_account_lookup.sql`: the
+     `mcgill_account_exists` check used by the login page.
+   - `supabase/migrations/20261121000100_mcmap_schema.sql`: `profiles`,
+     `mcgillians`, `groups`, `events`, `event_rsvps`, Row Level Security,
+     the `search_mcgillians` function, and the `avatars` / `group-images`
+     storage buckets. It also creates a profile row for any existing accounts.
+3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
+   editor. It's generated from the in-app club catalog
+   (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
+   match the app's club IDs. Event dates are relative to when you run it.
+4. Enable email/password authentication in **Authentication → Providers**.
+5. In **Authentication → URL Configuration**, configure the Site URL and redirect URLs if email confirmation is enabled.
+6. Optionally disable email confirmation for immediate account login during development.
 
-Then run the app with compile-time credentials:
+### What happens after login
+
+`AuthGate` (in `lib/main.dart`) loads the user's `profiles` row:
+
+- `onboarding_completed = false` → academic profile → interests (skippable)
+  → clubs, then saves everything to `profiles` and opens the app.
+- `onboarding_completed = true` → straight into the McMap app.
+
+Saved in Supabase: academic profile and interests, name/bio/photo edits
+(photos go to the `avatars` bucket under `<user id>/`), RSVPs, and
+McGillians (follow requests to private profiles stay `requested`).
+Still on-device only: club memberships, followed clubs, notification
+opt-ins and the privacy settings. Those need tables of their own.
+
+### Offline demo
+
+Without `--dart-define` keys the app shows a setup notice with an
+**Explore the offline demo** button. It runs the whole app on sample data
+(this is also what the tests use).
+
+Run the app with compile-time credentials:
 
 ```bash
 flutter run -d chrome \
@@ -20,26 +57,7 @@ flutter run -d chrome \
   --dart-define=SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 ```
 
-Use the same options for Android, iOS, or Linux:
-
-```bash
-flutter run -d linux \
-  --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
-  --dart-define=SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
-```
-
 Never use or commit a Supabase service-role key. The publishable/anon key is intended for client applications.
-
-## Microsoft setup
-
-In Microsoft Entra ID, register a web application and add the Supabase callback URL supplied by the Supabase Microsoft provider settings. Add any required Microsoft redirect URLs to Supabase after the provider is enabled.
-
-Native Android and iOS builds use `io.mcmap.app://login-callback`. The schemes are registered in:
-
-- `android/app/src/main/AndroidManifest.xml`
-- `ios/Runner/Info.plist`
-
-Web authentication uses the current web origin and should therefore be allowlisted in Supabase URL configuration.
 
 ## Development
 
@@ -64,7 +82,8 @@ groups outside the listed sources.
 Onboarding and club management share `UserProfile`. Memberships are
 self-reported and keyed by catalog ID. They start private with auto-RSVP off.
 Hiding keeps the selection and opt-in. Removing drops both preferences for that club
-and keeps prior event decisions. Profile data and RSVPs are session-only.
+and keeps prior event decisions. In the offline demo, profile data and
+RSVPs are session-only; when signed in they're stored in Supabase (see above).
 
 For authenticated integration, persist the profile and per-club preferences
 under the verified user ID. The server must enforce profile and membership

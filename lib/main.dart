@@ -1,22 +1,215 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'backend/mcmap_backend.dart';
+import 'backend/supabase_backend.dart';
+import 'pages/home_page.dart';
 import 'pages/login_page.dart';
+import 'pages/onboarding/academic_info_page.dart';
+import 'pages/onboarding_page.dart';
+import 'pages/welcome_back_page.dart';
 import 'theme/app_theme.dart';
+import 'widgets/auth_scaffold.dart';
 
-void main() {
-  runApp(const McMapApp());
+const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const _supabasePublishableKey = String.fromEnvironment(
+  'SUPABASE_PUBLISHABLE_KEY',
+);
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  McMapBackend? backend;
+  if (_supabaseUrl.isNotEmpty && _supabasePublishableKey.isNotEmpty) {
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      publishableKey: _supabasePublishableKey,
+    );
+    backend = SupabaseBackend(Supabase.instance.client);
+  }
+
+  runApp(McMapApp(backend: backend));
 }
 
+/// With a [backend]: Supabase auth → onboarding (if incomplete) → McMap.
+/// Without one: a setup notice with a way into the offline demo.
 class McMapApp extends StatelessWidget {
-  const McMapApp({super.key});
+  const McMapApp({super.key, this.backend});
+
+  final McMapBackend? backend;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    final backend = this.backend;
+    final app = MaterialApp(
       title: 'McMap',
       debugShowCheckedModeBanner: false,
       theme: buildMcMapTheme(),
-      home: const LoginPage(),
+      home: backend == null
+          ? const ConfigurationPage()
+          : AuthGate(backend: backend),
+      onGenerateRoute: (settings) {
+        final email = settings.arguments is String
+            ? settings.arguments as String
+            : null;
+        Route<void> login() => MaterialPageRoute<void>(
+          builder: (_) => const LoginPage(),
+          settings: const RouteSettings(name: '/login'),
+        );
+
+        switch (settings.name) {
+          case '/welcome-back':
+            if (email == null || email.isEmpty) return login();
+            return MaterialPageRoute<void>(
+              builder: (_) => WelcomeBackPage(email: email),
+              settings: settings,
+            );
+          case '/onboarding':
+            if (email == null || email.isEmpty) return login();
+            return MaterialPageRoute<void>(
+              builder: (_) => OnboardingPage(email: email),
+              settings: settings,
+            );
+          case '/login':
+            return login();
+        }
+        return null;
+      },
+    );
+    return backend == null ? app : BackendScope(backend: backend, child: app);
+  }
+}
+
+/// Signed out → login. Signed in → loads `profiles`, then onboarding if it
+/// isn't finished, otherwise the McMap app.
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key, required this.backend});
+
+  final McMapBackend backend;
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  late final StreamSubscription<AuthState> _authSubscription;
+  User? _user;
+  Future<AccountProfile>? _account;
+
+  @override
+  void initState() {
+    super.initState();
+    _setUser(Supabase.instance.client.auth.currentUser);
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
+      state,
+    ) {
+      final user = state.session?.user;
+      if (mounted && user?.id != _user?.id) setState(() => _setUser(user));
+    });
+    widget.backend.profileRevision.addListener(_reload);
+  }
+
+  void _setUser(User? user) {
+    _user = user;
+    _account = user == null ? null : widget.backend.loadMyProfile();
+  }
+
+  void _reload() {
+    if (mounted) setState(() => _setUser(_user));
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    widget.backend.profileRevision.removeListener(_reload);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_user == null) return const LoginPage();
+    return FutureBuilder(
+      future: _account,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _ProfileError(
+            onRetry: _reload,
+            onSignOut: widget.backend.signOut,
+          );
+        }
+        final account = snapshot.data;
+        if (account == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final academics = account.academics;
+        if (academics == null) {
+          return AcademicInfoPage(onSignOut: widget.backend.signOut);
+        }
+        return HomePage(
+          key: ValueKey(account.id),
+          profile: academics,
+          account: account,
+          backend: widget.backend,
+        );
+      },
+    );
+  }
+}
+
+class _ProfileError extends StatelessWidget {
+  const _ProfileError({required this.onRetry, required this.onSignOut});
+
+  final VoidCallback onRetry;
+  final Future<void> Function() onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return AuthScaffold(
+      icon: Icons.cloud_off_rounded,
+      title: "Couldn't load your profile",
+      subtitle: 'Check your connection and try again.',
+      children: [
+        FilledButton(onPressed: onRetry, child: const Text('Try again')),
+        const SizedBox(height: 8),
+        TextButton(onPressed: onSignOut, child: const Text('Sign out')),
+      ],
+    );
+  }
+}
+
+class ConfigurationPage extends StatelessWidget {
+  const ConfigurationPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AuthScaffold(
+      icon: Icons.warning_amber_rounded,
+      title: 'Supabase configuration required',
+      subtitle:
+          'Run the app with SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY '
+          'passed using --dart-define.',
+      children: [
+        OutlinedButton(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const AcademicInfoPage()),
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+          ),
+          child: const Text('Explore the offline demo'),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Demo data stays on this device and resets when the app restarts.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: McMapColors.slate),
+        ),
+      ],
     );
   }
 }

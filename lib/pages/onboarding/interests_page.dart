@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../backend/mcmap_backend.dart';
 import '../../data/interests.dart';
 import '../../models/user_profile.dart';
 import '../../theme/app_theme.dart';
@@ -37,6 +38,27 @@ class _InterestsPageState extends State<InterestsPage> {
     final profile = widget.profile
         .copyWith(interests: _selected)
         .withClubIds(ids);
+
+    // Signed in: save to Supabase, then return to AuthGate, which reloads
+    // the profile and opens the app.
+    final backend = BackendScope.maybeOf(context);
+    if (backend != null) {
+      final navigator = Navigator.of(context);
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        await backend.completeOnboarding(profile);
+        navigator.popUntil((route) => route.isFirst);
+      } catch (_) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't save your profile. Try again."),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Offline demo: go straight to the app.
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => HomePage(profile: profile)),
       (_) => false,

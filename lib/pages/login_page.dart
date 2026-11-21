@@ -1,6 +1,27 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'onboarding/academic_info_page.dart';
+import '../widgets/auth_scaffold.dart';
+
+bool isMcGillEmail(String email) {
+  final normalized = email.trim().toLowerCase();
+  final parts = normalized.split('@');
+  if (parts.length != 2) return false;
+
+  final domain = parts.last;
+  return domain == 'mcgill.ca' || domain.endsWith('.mcgill.ca');
+}
+
+String defaultNameFromEmail(String email) {
+  final localPart = email.trim().split('@').first;
+  final words = localPart
+      .split(RegExp(r'[._+-]'))
+      .where((word) => word.isNotEmpty)
+      .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+      .toList();
+
+  return words.isEmpty ? 'McGill Student' : words.join(' ');
+}
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -10,94 +31,104 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  final _emailController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
-  Future<void> _signInWithMicrosoft() async {
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() => _isLoading = true);
 
-    // TODO(auth): call the real Microsoft sign-in here and only continue
-    // when it succeeds. For now we skip straight to onboarding.
+    final email = _emailController.text.trim().toLowerCase();
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const AcademicInfoPage()));
+    try {
+      final exists = await Supabase.instance.client.rpc(
+        'mcgill_account_exists',
+        params: {'p_email': email},
+      );
+
+      if (!mounted) return;
+      if (exists == true) {
+        Navigator.of(context).pushNamed('/welcome-back', arguments: email);
+      } else {
+        Navigator.of(context).pushNamed('/onboarding', arguments: email);
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not check this email. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    return AuthScaffold(
+      icon: Icons.map_rounded,
+      title: 'Welcome to McMap',
+      subtitle: 'Enter your McGill email to continue.',
 
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [colorScheme.primaryContainer, colorScheme.surface],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Icon(
-                          Icons.map_rounded,
-                          size: 56,
-                          color: colorScheme.primary,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Welcome to McMap',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.headlineMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Sign in with your Microsoft account to continue.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 28),
-                        FilledButton.icon(
-                          onPressed: _isLoading ? null : _signInWithMicrosoft,
-                          icon: _isLoading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.login_rounded),
-                          label: Text(
-                            _isLoading
-                                ? 'Signing in…'
-                                : 'Continue with Microsoft',
-                          ),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(52),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+      children: [
+        Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                key: const Key('email-field'),
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.email],
+                onFieldSubmitted: (_) => _submit(),
+                decoration: const InputDecoration(
+                  labelText: 'McGill email',
+                  hintText: 'name@mail.mcgill.ca',
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+                validator: (value) {
+                  final email = value?.trim() ?? '';
+                  if (email.isEmpty) {
+                    return 'Enter your McGill email';
+                  }
+                  if (!isMcGillEmail(email)) {
+                    return 'Use an email ending in @mcgill.ca or a McGill subdomain';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _isLoading ? null : _submit,
+                icon: _isLoading
+                    ? const ButtonSpinner()
+                    : const Icon(Icons.arrow_forward_rounded),
+                label: Text(_isLoading ? 'Checking…' : 'Continue'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
                 ),
               ),
-            ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }

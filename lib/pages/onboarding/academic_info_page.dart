@@ -12,7 +12,11 @@ import 'interests_page.dart';
 /// Each section appears once the one above it is answered, so nobody sees
 /// questions that don't apply to them.
 class AcademicInfoPage extends StatefulWidget {
-  const AcademicInfoPage({super.key});
+  const AcademicInfoPage({super.key, this.onSignOut});
+
+  /// Shown as "Sign out" in the app bar when onboarding is the first screen
+  /// after logging in (there's no back button to leave otherwise).
+  final VoidCallback? onSignOut;
 
   @override
   State<AcademicInfoPage> createState() => _AcademicInfoPageState();
@@ -99,7 +103,13 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
     final degree = _degree;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Step 1 of 3')),
+      appBar: AppBar(
+        title: const Text('Step 1 of 3'),
+        actions: [
+          if (widget.onSignOut case final signOut?)
+            TextButton(onPressed: signOut, child: const Text('Sign out')),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

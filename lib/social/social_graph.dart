@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
+import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
 
 /// Your relationship to another student.
@@ -28,7 +31,13 @@ class McGillian {
     this.firstYearAtMcGill = false,
     this.isPrivate = false,
     this.bio = '',
+    this.id,
+    this.avatarUrl,
   });
+
+  /// `profiles.id` when loaded from the server; null for demo students.
+  final String? id;
+  final String? avatarUrl;
 
   final String name;
 
@@ -75,49 +84,157 @@ class McGillian {
   }
 }
 
-/// Demo friend graph. Lives in memory until there's a backend.
+/// Your McGillians. In demo mode it's an in-memory sample directory; with a
+/// [backend] it starts empty and fills from the server (your connections,
+/// plus search results as you type).
 class SocialGraph extends ChangeNotifier {
   SocialGraph({
-    this.directory = sampleMcGillians,
+    List<McGillian> directory = sampleMcGillians,
     Set<String> following = const {'maya.t', 'leo.b', 'sofia.r'},
-  }) : _status = {
+  }) : backend = null,
+       _directory = [...directory],
+       _status = {
          for (final handle in following) handle: FriendStatus.following,
        };
 
-  final List<McGillian> directory;
+  /// Server-backed graph. Call [load] once to fetch your connections.
+  SocialGraph.remote(McMapBackend this.backend) : _directory = [], _status = {};
+
+  final McMapBackend? backend;
+  final List<McGillian> _directory;
   final Map<String, FriendStatus> _status;
+
+  /// Called when a server request fails (e.g. to show a snackbar).
+  void Function(Object error)? onError;
+
+  String? _lastRemoteQuery;
+  Timer? _searchDebounce;
+  bool _disposed = false;
+
+  List<McGillian> get directory => List.unmodifiable(_directory);
 
   FriendStatus statusOf(McGillian student) =>
       _status[student.handle] ?? FriendStatus.none;
 
+  Future<void> load() async {
+    final backend = this.backend;
+    if (backend == null) return;
+    try {
+      final connections = await backend.fetchMyConnections();
+      for (final (student, status) in connections) {
+        _merge(student);
+        _status[student.handle] = status;
+      }
+      _notify();
+    } catch (error) {
+      onError?.call(error);
+    }
+  }
+
   /// "Add Friend": follows public profiles, requests private ones.
   void add(McGillian student) {
+    final previous = _status[student.handle];
     _status[student.handle] = student.isPrivate
         ? FriendStatus.requested
         : FriendStatus.following;
     notifyListeners();
+    final id = student.id;
+    if (backend == null || id == null) return;
+    backend!
+        .addMcGillian(id)
+        .then(
+          (status) {
+            _status[student.handle] = status;
+            _notify();
+          },
+          onError: (Object error) {
+            _restore(student, previous);
+            onError?.call(error);
+          },
+        );
   }
 
   /// Cancels a request or removes a connection.
   void remove(McGillian student) {
-    if (_status.remove(student.handle) != null) notifyListeners();
+    final previous = _status.remove(student.handle);
+    if (previous == null) return;
+    notifyListeners();
+    final id = student.id;
+    if (backend == null || id == null) return;
+    backend!.removeMcGillian(id).catchError((Object error) {
+      _restore(student, previous);
+      onError?.call(error);
+    });
   }
 
   /// People you're connected to: your McGillians.
   List<McGillian> get connections => [
-    for (final student in directory)
+    for (final student in _directory)
       if (statusOf(student) == FriendStatus.following) student,
   ];
 
-  /// Their count as others see it, including you if you're connected.
+  /// Their count as others see it. Demo counts exclude you, so you're added
+  /// when connected; server counts are already up to date.
   int countFor(McGillian student) =>
       student.mcgilliansCount +
-      (statusOf(student) == FriendStatus.following ? 1 : 0);
+      (backend == null && statusOf(student) == FriendStatus.following ? 1 : 0);
 
-  List<McGillian> search(String query) => [
-    for (final student in directory)
-      if (query.isEmpty || student.matches(query)) student,
-  ];
+  /// Matches from what's loaded so far. With a backend this also kicks off
+  /// a server search; results arrive via [notifyListeners].
+  List<McGillian> search(String query) {
+    if (backend != null && query != _lastRemoteQuery) {
+      _lastRemoteQuery = query;
+      _searchDebounce?.cancel();
+      _searchDebounce = Timer(
+        const Duration(milliseconds: 250),
+        () => _searchRemote(query),
+      );
+    }
+    return [
+      for (final student in _directory)
+        if (query.isEmpty || student.matches(query)) student,
+    ];
+  }
+
+  Future<void> _searchRemote(String query) async {
+    try {
+      final results = await backend!.searchMcGillians(query);
+      if (query != _lastRemoteQuery) return;
+      results.forEach(_merge);
+      _notify();
+    } catch (error) {
+      onError?.call(error);
+    }
+  }
+
+  void _merge(McGillian student) {
+    final index = _directory.indexWhere((s) => s.handle == student.handle);
+    if (index == -1) {
+      _directory.add(student);
+    } else {
+      _directory[index] = student;
+    }
+  }
+
+  void _restore(McGillian student, FriendStatus? previous) {
+    if (previous == null) {
+      _status.remove(student.handle);
+    } else {
+      _status[student.handle] = previous;
+    }
+    _notify();
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
 }
 
 const sampleMcGillians = [

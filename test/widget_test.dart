@@ -15,10 +15,11 @@ Future<void> _goToAcademicInfo(WidgetTester tester) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
 
+  // No Supabase keys in tests, so this goes through the offline demo.
   await tester.pumpWidget(const McMapApp());
-  expect(find.text('Welcome to McMap'), findsOneWidget);
+  expect(find.text('Supabase configuration required'), findsOneWidget);
 
-  await tester.tap(find.text('Continue with Microsoft'));
+  await tester.tap(find.text('Explore the offline demo'));
   await tester.pumpAndSettle();
   expect(find.text('What do you study?'), findsOneWidget);
 }

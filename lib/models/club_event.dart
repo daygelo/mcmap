@@ -12,6 +12,10 @@ class ClubEvent {
     this.startsAt,
     this.description,
     this.synopsis,
+    this.clubAvatarUrl,
+    this.latitude,
+    this.longitude,
+    this.tags = const [],
     this.cancelled = false,
     this.supportsUnrestrictedRsvp = false,
   });
@@ -31,6 +35,14 @@ class ClubEvent {
   /// with an "AI Summary" label. Generated server-side when the event is
   /// published (TODO(ai): wire up the summarizer); null until then.
   final String? synopsis;
+
+  /// The hosting group's picture (`groups.avatar_url`).
+  final String? clubAvatarUrl;
+
+  /// Venue coordinates for the RSVP map.
+  final double? latitude;
+  final double? longitude;
+  final List<String> tags;
   final bool cancelled;
 
   /// Set by the publication source only for in-app RSVPs with no external

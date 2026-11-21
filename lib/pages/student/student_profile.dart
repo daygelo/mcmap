@@ -20,7 +20,11 @@ class StudentProfile {
     this.interests = const {},
     this.avatarUrl,
     this.avatarBytes,
+    this.handle,
   });
+
+  /// "@handle" under the name. Null for the offline demo profile.
+  final String? handle;
 
   final String name;
   final String faculty;
@@ -51,7 +55,23 @@ class StudentProfile {
     interests: interests,
     avatarUrl: bytes == null ? null : avatarUrl,
     avatarBytes: bytes,
+    handle: handle,
   );
+
+  /// Same profile pointing at an uploaded photo.
+  StudentProfile withPhotoUrl(String url, {Uint8List? preview}) =>
+      StudentProfile(
+        name: name,
+        faculty: faculty,
+        major: major,
+        year: year,
+        firstYearAtMcGill: firstYearAtMcGill,
+        bio: bio,
+        interests: interests,
+        avatarUrl: url,
+        avatarBytes: preview,
+        handle: handle,
+      );
 }
 
 class ProfileAvatar extends StatelessWidget {
@@ -219,7 +239,10 @@ class ProfileHeader extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(profile.name, style: text.titleLarge),
-            Text('Sample profile', style: text.bodySmall),
+            Text(
+              profile.handle == null ? 'Sample profile' : '@${profile.handle}',
+              style: text.bodySmall,
+            ),
             const SizedBox(height: 4),
             Text('${profile.major} · ${profile.year}'),
             Text(profile.faculty, style: text.bodySmall),

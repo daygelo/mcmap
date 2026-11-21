@@ -1,38 +1,20 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../models/user_profile.dart';
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key, required this.user});
+  const HomePage({super.key, this.profile});
 
-  final User user;
+  final UserProfile? profile;
 
-  String get _displayName {
-    final metadata = user.userMetadata;
-    final name = metadata?['full_name'] ?? metadata?['name'];
-    if (name is String && name.trim().isNotEmpty) return name.trim();
-    if (user.email != null && user.email!.isNotEmpty) return user.email!;
-    return 'McMap user';
-  }
-
-  Future<void> _signOut() async {
-    await Supabase.instance.client.auth.signOut();
-  }
+  static const _displayName = 'McMap user';
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('McMap'),
-        actions: [
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: _signOut,
-            icon: const Icon(Icons.logout_rounded),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('McMap')),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -47,9 +29,7 @@ class HomePage extends StatelessWidget {
                     backgroundColor: colorScheme.primary,
                     foregroundColor: colorScheme.onPrimary,
                     child: Text(
-                      _displayName.isNotEmpty
-                          ? _displayName[0].toUpperCase()
-                          : 'M',
+                      _displayName[0].toUpperCase(),
                       style: const TextStyle(fontSize: 24),
                     ),
                   ),
@@ -66,11 +46,6 @@ class HomePage extends StatelessWidget {
                           _displayName,
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
-                        if (user.email != null)
-                          Text(
-                            user.email!,
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
                       ],
                     ),
                   ),
@@ -85,12 +60,39 @@ class HomePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Home',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  Text('Home', style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 8),
-                  const Text('You are signed in and ready to use McMap.'),
+                  const Text('Ready to use McMap.'),
+                  if (profile case final profile?) ...[
+                    const SizedBox(height: 16),
+                    Text('${profile.major} · ${profile.faculty}'),
+                    const SizedBox(height: 12),
+                    if (profile.hasInterests)
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final interest in profile.interests)
+                            Chip(label: Text(interest)),
+                        ],
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Showing popular events from ${profile.faculty} '
+                          'and across campus. Add interests anytime to '
+                          'personalize your feed.',
+                          style: TextStyle(
+                            color: colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),

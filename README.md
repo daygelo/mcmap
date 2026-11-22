@@ -34,8 +34,11 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      events, RSVPs, publishers and follows. Running an older `seed.sql`
      afterwards would add the duplicates back.
    - `supabase/migrations/20261122110000_notifications.sql`: adds
-     `events.rsvp_deadline`, friend RSVP counts and `notifications`. Run it
-     last; see [Notifications](#notifications).
+     `events.rsvp_deadline`, friend RSVP counts and `notifications`; see
+     [Notifications](#notifications).
+   - `supabase/migrations/20261122120000_public_rsvps.sql`: makes new RSVPs
+     public by default and adds `profiles.rsvp_visibility`. Run it last; see
+     [RSVP privacy](#rsvp-privacy).
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
@@ -59,7 +62,7 @@ Saved in Supabase: academic profile and interests, name/bio/photo edits
 (photos go to the `avatars` bucket under `<user id>/`), RSVPs, and
 McGillians (follow requests to private profiles stay `requested`).
 Organization follows are also saved after the migration below. Event notification
-opt-ins and the default RSVP audience remain session preferences.
+opt-ins remain session preferences.
 
 ### Offline demo
 
@@ -90,6 +93,10 @@ run that script to regenerate `lib/data/campus_building_shapes.dart`. Shapes
 are the surveyed roofs in Montréal's 3D building model (CC BY 4.0), divided
 along © OpenStreetMap outlines (ODbL), with ground level from Natural Resources
 Canada's HRDEM (Open Government Licence - Canada). The map key credits them.
+
+The basemap's greens (parks, lawns, street trees) and pale buildings are set in
+`campusBasemap` in `lib/data/campus_map.dart`. A test keeps the highlighted
+buildings and pins standing out from them.
 
 Mapbox reports every building along the line of sight, so `SightLine` works out
 whether a tapped building is hidden behind another one.
@@ -131,9 +138,10 @@ and on an organization's details page.
 The organization picker preselects researched student associations from
 `lib/data/academic_auto_follows.dart`. Each rule carries its catalog ID,
 eligibility, and source. The picker lets students deselect defaults or skip
-optional groups while retaining the academic selections they approved. Campus
-is an optional onboarding input. Confirmed program-campus mappings may fill
-a blank, and an uncertain or other campus leaves campus-specific defaults off.
+optional groups while retaining the academic selections they approved. Signup
+only covers downtown: it doesn't ask for a campus, and Macdonald Campus
+programs and societies (`macdonaldOrganizationIds`) aren't offered or suggested.
+Those societies stay in the directory for students who already follow them.
 
 The final choices use the same Following records as manual follows. Defaults
 run only in onboarding, so later sign-ins and profile edits never re-add an
@@ -176,7 +184,8 @@ follow row and keyed by the same stable group slug used in events. Enabling
 records the server timestamp. Disabling or unfollowing removes it without
 changing RSVP history. Offline preferences are session-only.
 
-The local publication stream demonstrates private automatic RSVPs. Production
+The local publication stream demonstrates automatic RSVPs, with the audience
+chosen in Settings. Production
 background automation is pending. A server-side publication worker needs to
 process newly visible events, check exact group identity and consent time,
 require explicit unrestricted eligibility, and atomically preserve manual
@@ -223,8 +232,7 @@ friend counts.
   `supabase_realtime` publication.
 
 Friend counts (`friend_rsvps()`) include McGillians the student follows whose
-RSVP is visible to **Friends** or **Public**. RSVPs are private by default, and
-private ones never count. `publish_event` does not set `rsvp_deadline` yet, so
+RSVP is visible to **Friends** or **Public**. Private ones never count. `publish_event` does not set `rsvp_deadline` yet, so
 RSVPs close at the start time unless a deadline is set in the database.
 
 With the migrations applied to a local Supabase instance:
@@ -233,6 +241,27 @@ With the migrations applied to a local Supabase instance:
 psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
   -f supabase/tests/notifications.sql
 ```
+
+## RSVP privacy
+
+RSVPs are public unless the student picks **Friends** or **Private** in
+Settings. The choice is saved in `profiles.rsvp_visibility` and used for new
+RSVPs; existing ones keep their audience, including those made while the default
+was private. A McGillian's profile lists the upcoming events they're going to,
+as far as row level security allows. Until the migration is run the choice lasts
+for the session.
+
+```bash
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/public_rsvps.sql
+```
+
+## Refreshing
+
+Home, All campus events and Profile refresh when dragged past the top or bottom
+(`lib/widgets/pull_to_refresh.dart`). Web trackpads can't scroll past the end of
+a list, so scrolling on from an end counts there. RSVPs that are being saved, or
+that change during a refresh, win over the server's copy.
 
 ## Event publishing
 

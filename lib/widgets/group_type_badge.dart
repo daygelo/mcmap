@@ -4,12 +4,15 @@ import '../data/clubs.dart';
 import '../theme/app_theme.dart';
 
 /// Small label saying what kind of organization this is. Governance is
-/// McGill red on tint, research is charcoal, everything else is neutral.
+/// McGill red on tint, research is charcoal, and the rest have natural accents.
 /// Every pairing passes WCAG AA.
 class GroupTypeBadge extends StatelessWidget {
   const GroupTypeBadge(this.type, {super.key});
 
   final OrganizationType type;
+
+  static (Color, Color, Color) _natural(McMapAccent accent) =>
+      (accent.tint, accent.deep, accent.deep.withValues(alpha: 0.25));
 
   @override
   Widget build(BuildContext context) {
@@ -28,11 +31,12 @@ class GroupTypeBadge extends StatelessWidget {
         McMapColors.white,
         McMapColors.ink,
       ),
-      _ => (
-        McMapColors.surfaceMuted,
-        McMapColors.ink,
-        McMapColors.borderStrong,
-      ),
+      OrganizationType.club => _natural(McMapAccent.moss),
+      OrganizationType.designTeam => _natural(McMapAccent.lake),
+      OrganizationType.studentSociety => _natural(McMapAccent.heather),
+      OrganizationType.firstYearCouncil ||
+      OrganizationType.firstYearCommittee ||
+      OrganizationType.firstYearSociety => _natural(McMapAccent.amber),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),

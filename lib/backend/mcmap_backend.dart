@@ -20,6 +20,7 @@ class AccountProfile {
     this.avatarUrl,
     this.bio = '',
     this.academics,
+    this.rsvpVisibility = StudentVisibility.defaultForRsvps,
   });
 
   final String id;
@@ -30,6 +31,9 @@ class AccountProfile {
 
   /// Null until onboarding (academic profile) is complete.
   final UserProfile? academics;
+
+  /// Who can see the RSVPs they make next.
+  final StudentVisibility rsvpVisibility;
 
   bool get onboardingCompleted => academics != null;
 }
@@ -95,6 +99,12 @@ abstract interface class McMapBackend {
 
   /// Null cancels the RSVP.
   Future<void> setRsvp(String eventId, StudentVisibility? visibility);
+
+  /// Saves who can see RSVPs from now on. Existing ones don't change.
+  Future<void> setRsvpVisibility(StudentVisibility visibility);
+
+  /// Events another student is going to, as far as they let you see.
+  Future<List<ClubEvent>> fetchRsvpsOf(String profileId);
 
   /// Your McGillians going to upcoming events, by event id. Events with none
   /// are left out, as are RSVPs their owner keeps private.

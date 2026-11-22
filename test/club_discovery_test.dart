@@ -943,7 +943,7 @@ void main() {
       const faculty = 'Faculty of Science';
       const autoLabel = 'Auto-RSVP to events';
       final autoSwitch = find.widgetWithText(SwitchListTile, autoLabel);
-      final private = find.text('Going · Demo visibility: Private');
+      final going = find.text('Going · Public');
 
       Future<ClubEvent> publish(
         String title,
@@ -999,13 +999,13 @@ void main() {
       await tester.pumpAndSettle();
       await publish('Other club', _boardGamesId);
       await publish('Paid workshop', _esportsId, unrestricted: false);
-      expect(private.hitTestable(), findsOneWidget);
+      expect(going.hitTestable(), findsOneWidget);
       expect(find.text('Club workshop').hitTestable(), findsOneWidget);
       expect(find.text('Paid workshop').hitTestable(), findsNothing);
       await _tapText(tester, 'Cancel RSVP');
       publications.add(first);
       await tester.pumpAndSettle();
-      expect(private.hitTestable(), findsNothing);
+      expect(going.hitTestable(), findsNothing);
 
       await _tapText(tester, '1 Following');
       await _tap(tester, autoSwitch);
@@ -1033,7 +1033,7 @@ void main() {
         name: faculty,
       );
       await publish('Faculty seminar', facultyId, name: faculty);
-      expect(private.hitTestable(), findsOneWidget);
+      expect(going.hitTestable(), findsOneWidget);
       expect(find.text('Faculty seminar').hitTestable(), findsOneWidget);
       await _tapText(tester, '2 Following');
       final club = find.widgetWithText(ListTile, _name(_esportsId));
@@ -1043,7 +1043,7 @@ void main() {
       );
       await _back(tester);
       await publish('After unfollow', _esportsId);
-      expect(private.hitTestable(), findsOneWidget);
+      expect(going.hitTestable(), findsOneWidget);
       expect(find.text('Faculty seminar').hitTestable(), findsOneWidget);
       expect(find.text('1 Following'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
@@ -1093,10 +1093,7 @@ void main() {
       publications.add(first);
       publications.add(first);
       await tester.pumpAndSettle();
-      expect(
-        find.text('Going · Demo visibility: Private').hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.text('Going · Public').hitTestable(), findsOneWidget);
       await _tapText(tester, '1 Following');
       await tester.tap(find.text('Unfollow'));
       await tester.pumpAndSettle();
@@ -1108,10 +1105,7 @@ void main() {
       await tester.pumpAndSettle();
       publications.add(published('After removal'));
       await tester.pumpAndSettle();
-      expect(
-        find.text('Going · Demo visibility: Private').hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.text('Going · Public').hitTestable(), findsOneWidget);
       expect(find.text('After removal').hitTestable(), findsNothing);
       await tester.tap(find.text('Cancel RSVP').hitTestable());
       await tester.pumpAndSettle();

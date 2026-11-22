@@ -330,6 +330,22 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
+  Future<void> setRsvpVisibility(StudentVisibility visibility) => client
+      .from('profiles')
+      .update({'rsvp_visibility': visibilityToDb(visibility)})
+      .eq('id', _uid);
+
+  @override
+  Future<List<ClubEvent>> fetchRsvpsOf(String profileId) async {
+    // Row level security leaves out the ones they keep from you.
+    final rows = await client
+        .from('event_rsvps')
+        .select('event:events!inner($_eventColumns)')
+        .eq('profile_id', profileId);
+    return [for (final row in rows) _event(row['event'])];
+  }
+
+  @override
   Future<Map<String, FriendRsvps>> fetchFriendRsvps() async {
     final List<dynamic> rows;
     try {
@@ -511,6 +527,10 @@ class SupabaseBackend implements McMapBackend {
       fullName: row['full_name'] as String? ?? '',
       avatarUrl: row['avatar_url'] as String?,
       bio: row['bio'] as String? ?? '',
+      rsvpVisibility: switch (row['rsvp_visibility']) {
+        null => StudentVisibility.defaultForRsvps,
+        final saved => visibilityFromDb(saved),
+      },
       academics: !done || degree == null || faculty == null
           ? null
           : UserProfile(

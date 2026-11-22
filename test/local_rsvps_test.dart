@@ -57,7 +57,7 @@ void main() {
     }
   });
 
-  test('only new eligible events RSVP, privately and once per event ID', () {
+  test('only new eligible events RSVP, publicly and once per event ID', () {
     final now = DateTime.utc(2026, 11, 21, 12);
     final enabledAt = now.subtract(const Duration(hours: 1));
     final profile = UserProfile(
@@ -119,12 +119,12 @@ void main() {
     final eligible = event('new');
     rsvps.onPublished(eligible, profile, now: now);
     rsvps.onPublished(eligible, profile, now: now);
-    expect(rsvps.visibilityFor(eligible.id), StudentVisibility.private);
+    expect(rsvps.visibilityFor(eligible.id), StudentVisibility.public);
 
     final disabled = profile.copyWith(clubAutoRsvpOptIns: {});
     rsvps.onPublished(event('disabled'), disabled, now: now);
     expect(rsvps.visibilityFor('disabled'), isNull);
-    expect(rsvps.visibilityFor(eligible.id), StudentVisibility.private);
+    expect(rsvps.visibilityFor(eligible.id), StudentVisibility.public);
 
     rsvps.toggle(eligible.id, StudentVisibility.public);
     rsvps.onPublished(eligible, profile, now: now);

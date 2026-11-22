@@ -236,6 +236,27 @@ class FakeBackend implements McMapBackend {
     if (failRsvp) throw Exception('offline');
   }
 
+  final visibilitySaves = <StudentVisibility>[];
+  bool failVisibility = false;
+
+  @override
+  Future<void> setRsvpVisibility(StudentVisibility visibility) async {
+    visibilitySaves.add(visibility);
+    if (failVisibility) throw Exception('offline');
+  }
+
+  /// What other students are going to, by profile id.
+  final rsvpsOf = <String, List<ClubEvent>>{};
+  int rsvpsOfLoads = 0;
+  bool failRsvpsOf = false;
+
+  @override
+  Future<List<ClubEvent>> fetchRsvpsOf(String profileId) async {
+    rsvpsOfLoads++;
+    if (failRsvpsOf) throw Exception('offline');
+    return rsvpsOf[profileId] ?? const [];
+  }
+
   @override
   Future<List<McGillian>> searchMcGillians(String query) async => [
     for (final s in [priya, sam])
@@ -1042,7 +1063,7 @@ void main() {
       final backend = await _pumpHome(tester);
       await tester.tap(find.text('RSVP'));
       await tester.pumpAndSettle();
-      expect(backend.rsvpCalls.single, ('e1', StudentVisibility.private));
+      expect(backend.rsvpCalls.single, ('e1', StudentVisibility.public));
       expect(find.text('Cancel RSVP'), findsOneWidget);
 
       backend.failRsvp = true;

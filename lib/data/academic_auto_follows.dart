@@ -6,7 +6,6 @@ const _undergrad = {DegreeLevel.undergraduate};
 const _graduate = {DegreeLevel.masters, DegreeLevel.doctorate};
 const _professional = {DegreeLevel.undergraduate, DegreeLevel.professional};
 
-const _aes = 'Agricultural & Environmental Sciences';
 const _arts = 'Arts';
 const _artsScience = 'Arts & Science';
 const _education = 'Education';
@@ -29,33 +28,11 @@ const _ecse = {
   'Computer Engineering',
 };
 const _spot = {'Physical Therapy', 'Occupational Therapy', 'Physiotherapy'};
-const _macSpecific = {_bioresource, _dhn, _foodScience, _fmt};
+
+/// Taught at Macdonald Campus, so not part of the Engineering society.
 const _bioresource = {
   'Bioresource Engineering',
   'Biological Engineering (Bioresource Engineering)',
-};
-const _dhn = {
-  'Dietetics',
-  'Human Nutrition',
-  'Nutrition',
-  'Dietetics and Human Nutrition',
-};
-const _foodScience = {'Food Science', 'Food Science and Nutritional Sciences'};
-const _fmt = {
-  'Farm Management and Technology',
-  'Farm Management & Technology',
-  'FMT',
-};
-const _aesGeneral = {
-  'Agricultural Economics',
-  'Animal Science',
-  'Environmental Biology',
-  'Global Food Security',
-  'Plant Science',
-  'Agro-Environmental Sciences',
-  'Agricultural and Environmental Sciences',
-  'Life Sciences (Biological and Agricultural)',
-  undeclaredMajor,
 };
 
 /// A representative association, with exact normalized academic eligibility.
@@ -68,7 +45,7 @@ class AcademicFollowRule {
     this.faculties = const {},
     this.programs = const {},
     this.excludedPrograms = const {},
-    this.campus,
+    this.downtownOnly = false,
     this.firstYearOnly = false,
   });
 
@@ -79,7 +56,9 @@ class AcademicFollowRule {
   final Set<String> faculties;
   final Set<String> programs;
   final Set<String> excludedPrograms;
-  final AcademicCampus? campus;
+
+  /// Only for programs known to be taught downtown.
+  final bool downtownOnly;
   final bool firstYearOnly;
 
   String get sourceUrl => clubCatalogSources[sourceKey]!.$2;
@@ -90,26 +69,13 @@ const academicFollowRules = <AcademicFollowRule>[
     'mcgill-ssmu',
     11,
     'Downtown undergraduate student society.',
-    campus: AcademicCampus.downtown,
-  ),
-  AcademicFollowRule(
-    'mcgill-mcss',
-    11,
-    'Macdonald undergraduate student society.',
-    campus: AcademicCampus.macdonald,
+    downtownOnly: true,
   ),
   AcademicFollowRule(
     'mcgill-pgss',
     33,
     'University-wide graduate student representation.',
     degrees: _graduate,
-  ),
-  AcademicFollowRule(
-    'mcgill-mcgss',
-    11,
-    'Additional representation for Macdonald graduate students.',
-    degrees: _graduate,
-    campus: AcademicCampus.macdonald,
   ),
   AcademicFollowRule(
     'mcgill-maces',
@@ -747,51 +713,10 @@ const academicFollowRules = <AcademicFollowRule>[
   ),
 
   AcademicFollowRule(
-    'macdonald-aesus',
-    31,
-    'General Agricultural and Environmental Sciences undergraduate representation.',
-    faculties: {_aes},
-    programs: _aesGeneral,
-    campus: AcademicCampus.macdonald,
-  ),
-  AcademicFollowRule(
-    'engineering-bioresource-engineering-students-society-bess',
-    31,
-    'Macdonald Bioresource Engineering undergraduate representation.',
-    faculties: {_aes, _engineering},
-    programs: _bioresource,
-    campus: AcademicCampus.macdonald,
-  ),
-  AcademicFollowRule(
-    'macdonald-dhnus',
-    31,
-    'Macdonald Dietetics and Human Nutrition representation.',
-    faculties: {_aes},
-    programs: _dhn,
-    campus: AcademicCampus.macdonald,
-  ),
-  AcademicFollowRule(
-    'macdonald-fsa',
-    31,
-    'Macdonald Food Science undergraduate representation.',
-    faculties: {_aes},
-    programs: _foodScience,
-    campus: AcademicCampus.macdonald,
-  ),
-  AcademicFollowRule(
-    'macdonald-fmt',
-    31,
-    'Macdonald Farm Management and Technology representation.',
-    faculties: {_aes},
-    programs: _fmt,
-    campus: AcademicCampus.macdonald,
-  ),
-
-  AcademicFollowRule(
     'ssmu-first-year-council',
     46,
     'First-year undergraduate representation at SSMU.',
-    campus: AcademicCampus.downtown,
+    downtownOnly: true,
     firstYearOnly: true,
   ),
   AcademicFollowRule(
@@ -901,35 +826,13 @@ String _facultyKey(String input) {
 bool _includes(Set<String> values, String key) =>
     values.isEmpty || values.any((value) => _normalize(value) == key);
 
-AcademicCampus? _campusFor(
-  UserProfile profile,
-  String faculty,
-  String program,
-) {
-  if (profile.campus != null) return profile.campus;
-  if (faculty == _normalize(_aes) &&
-      (_includes(_aesGeneral, program) ||
-          _macSpecific.any((programs) => _includes(programs, program)))) {
-    return AcademicCampus.macdonald;
-  }
-  if (faculty == _normalize(_engineering) && _includes(_bioresource, program)) {
-    return AcademicCampus.macdonald;
-  }
-  // Shared and satellite programs need an explicit campus. Unknown faculty
-  // and program values never default to Downtown.
-  if (const {
-    'environment',
-    'bieler school of environment',
-    'medicine',
-    'mdcm',
-    'doctor of medicine and master of surgery',
-    'interfaculty program',
-  }.contains(program)) {
-    return null;
-  }
+/// Whether signup's faculty and program are known to be downtown. Unknown
+/// values never are.
+bool _isDowntown(String faculty, String program) {
   const downtown = {
     _arts,
     _artsScience,
+    _education,
     _engineering,
     _management,
     _music,
@@ -950,34 +853,22 @@ AcademicCampus? _campusFor(
                       _includes(rule.programs, program),
                 )),
       )) {
-    return AcademicCampus.downtown;
+    return true;
   }
-  // These programs are explicitly Downtown rather than relying on their
-  // multi-campus faculty as a whole.
-  if ((faculty == _normalize(_education) &&
-          _includes({
-            'Kinesiology',
-            'Physical & Health Education',
-            'Music Education',
-          }, program)) ||
-      (faculty == _normalize(_health) &&
-          _includes({'Nursing', ..._spot}, program))) {
-    return AcademicCampus.downtown;
-  }
-  return null;
+  // Medicine is also taught in Gatineau, so not that whole faculty.
+  return faculty == _normalize(_health) &&
+      _includes({'Nursing', ..._spot}, program);
 }
 
 /// Defaults are evaluated only while reviewing onboarding selections.
 Set<String> academicAutoFollowIds(UserProfile profile) {
   final program = _normalize(profile.major ?? '');
   final faculty = _facultyKey(profile.faculty);
-  final campus = faculty == _normalize(_continuing)
-      ? null
-      : _campusFor(profile, faculty, program);
+  final downtown = _isDowntown(faculty, program);
   return {
     for (final rule in academicFollowRules)
       if (rule.degrees.contains(profile.degreeLevel) &&
-          (rule.campus == null || rule.campus == campus) &&
+          (!rule.downtownOnly || downtown) &&
           _includes(rule.faculties, faculty) &&
           _includes(rule.programs, program) &&
           (!rule.firstYearOnly || profile.isFroshie) &&

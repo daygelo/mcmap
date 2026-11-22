@@ -192,7 +192,7 @@ class _McGillMapPageState extends State<McGillMapPage> {
     keepMapBehindFlutter();
     // One at a time: an option this style version doesn't have can't block
     // the rest.
-    for (final MapEntry(:key, :value) in _basemapConfig.entries) {
+    for (final MapEntry(:key, :value) in campusBasemap.entries) {
       await _try(
         key,
         () => map.setStyleImportConfigProperty('basemap', key, value),
@@ -723,19 +723,6 @@ const _buildingLayerSpecs = <Map<String, Object>>[
     },
   },
 ];
-
-/// Mapbox Standard options: pale buildings with soft daytime shadows, and few
-/// labels, so the red pins stand out.
-const _basemapConfig = <String, Object>{
-  'lightPreset': 'day',
-  'theme': 'monochrome',
-  'show3dObjects': true,
-  'colorBuildings': '#E5E7EB',
-  'showPointOfInterestLabels': false,
-  'showTransitLabels': false,
-  'showRoadLabels': true,
-  'showPlaceLabels': true,
-};
 
 const _pinLayerSpec = <String, Object>{
   'id': _pinLayer,

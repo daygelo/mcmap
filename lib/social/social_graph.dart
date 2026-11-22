@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
+import '../models/club_event.dart';
 
 /// Your relationship to another student.
 enum FriendStatus {
@@ -110,6 +111,15 @@ class SocialGraph extends ChangeNotifier {
   /// Called when the server has saved a change to your connections.
   VoidCallback? onConnectionsSaved;
 
+  /// Goes up each time that happens.
+  int savedConnections = 0;
+
+  /// Loads the upcoming events a student is going to and lets you see.
+  Future<List<ClubEvent>> Function(McGillian student)? loadGoing;
+
+  /// Opens one of those events.
+  ValueChanged<ClubEvent>? onOpenEvent;
+
   String? _lastRemoteQuery;
   Timer? _searchDebounce;
   bool _disposed = false;
@@ -148,8 +158,7 @@ class SocialGraph extends ChangeNotifier {
         .then(
           (status) {
             _status[student.handle] = status;
-            _notify();
-            if (!_disposed) onConnectionsSaved?.call();
+            _connectionsSaved();
           },
           onError: (Object error) {
             _restore(student, previous);
@@ -168,9 +177,7 @@ class SocialGraph extends ChangeNotifier {
     backend!
         .removeMcGillian(id)
         .then(
-          (_) {
-            if (!_disposed) onConnectionsSaved?.call();
-          },
+          (_) => _connectionsSaved(),
           onError: (Object error) {
             _restore(student, previous);
             onError?.call(error);
@@ -189,6 +196,25 @@ class SocialGraph extends ChangeNotifier {
   int countFor(McGillian student) =>
       student.mcgilliansCount +
       (backend == null && statusOf(student) == FriendStatus.following ? 1 : 0);
+
+  /// The latest copy of [student].
+  McGillian current(McGillian student) => _directory.firstWhere(
+    (other) => other.handle == student.handle,
+    orElse: () => student,
+  );
+
+  /// Your connections load without their stats; search results have them.
+  Future<void> loadStats(McGillian student) async {
+    final backend = this.backend;
+    if (backend == null) return;
+    try {
+      final results = await backend.searchMcGillians(student.handle);
+      results.where((found) => found.handle == student.handle).forEach(_merge);
+      _notify();
+    } catch (_) {
+      // The rest of the profile is still useful.
+    }
+  }
 
   /// Matches from what's loaded so far. With a backend this also kicks off
   /// a server search; results arrive via [notifyListeners].
@@ -234,6 +260,13 @@ class SocialGraph extends ChangeNotifier {
       _status[student.handle] = previous;
     }
     _notify();
+  }
+
+  void _connectionsSaved() {
+    if (_disposed) return;
+    savedConnections++;
+    notifyListeners();
+    onConnectionsSaved?.call();
   }
 
   void _notify() {

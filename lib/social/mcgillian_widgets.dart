@@ -1,7 +1,10 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../models/club_event.dart';
 import '../theme/app_theme.dart';
+import '../widgets/event_bits.dart';
 import '../widgets/froshie_tag.dart';
+import '../widgets/initials_avatar.dart';
 import '../widgets/profile_stats.dart';
 import 'social_graph.dart';
 
@@ -102,10 +105,11 @@ class McGillianAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = McMapAccent.of(student.name);
     return CircleAvatar(
       radius: radius,
-      backgroundColor: McMapColors.redTint,
-      foregroundColor: McMapColors.redStrong,
+      backgroundColor: accent.tint,
+      foregroundColor: accent.deep,
       foregroundImage: switch (student.avatarUrl) {
         final url? => NetworkImage(url),
         null => null,
@@ -183,8 +187,9 @@ class McGillianTile extends StatelessWidget {
 }
 
 /// Another student's profile, same Instagram layout as your own: avatar and
-/// stats side by side, details underneath, then the friend button.
-class McGillianProfilePage extends StatelessWidget {
+/// stats side by side, details underneath, then the friend button and the
+/// events they're going to.
+class McGillianProfilePage extends StatefulWidget {
   const McGillianProfilePage({
     super.key,
     required this.graph,
@@ -195,7 +200,21 @@ class McGillianProfilePage extends StatelessWidget {
   final McGillian student;
 
   @override
+  State<McGillianProfilePage> createState() => _McGillianProfilePageState();
+}
+
+class _McGillianProfilePageState extends State<McGillianProfilePage> {
+  SocialGraph get graph => widget.graph;
+
+  @override
+  void initState() {
+    super.initState();
+    graph.loadStats(widget.student);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final student = widget.student;
     final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Student profile')),
@@ -214,28 +233,31 @@ class McGillianProfilePage extends StatelessWidget {
                       children: [
                         ListenableBuilder(
                           listenable: graph,
-                          builder: (context, _) => ProfileTopRow(
-                            avatar: RingedAvatar(
-                              child: McGillianAvatar(
-                                student: student,
-                                radius: 37,
+                          builder: (context, _) {
+                            final latest = graph.current(student);
+                            return ProfileTopRow(
+                              avatar: RingedAvatar(
+                                child: McGillianAvatar(
+                                  student: student,
+                                  radius: 37,
+                                ),
                               ),
-                            ),
-                            stats: [
-                              ProfileStat(
-                                value: graph.countFor(student),
-                                label: 'McGillians',
-                              ),
-                              ProfileStat(
-                                value: student.eventsCount,
-                                label: 'Events',
-                              ),
-                              ProfileStat(
-                                value: student.clubsCount,
-                                label: 'Clubs',
-                              ),
-                            ],
-                          ),
+                              stats: [
+                                ProfileStat(
+                                  value: graph.countFor(latest),
+                                  label: 'McGillians',
+                                ),
+                                ProfileStat(
+                                  value: latest.eventsCount,
+                                  label: 'Events',
+                                ),
+                                ProfileStat(
+                                  value: latest.clubsCount,
+                                  label: 'Clubs',
+                                ),
+                              ],
+                            );
+                          },
                         ),
                         const SizedBox(height: 12),
                         Text(student.name, style: text.titleLarge),
@@ -268,11 +290,137 @@ class McGillianProfilePage extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (graph.loadGoing case final load?)
+                  _GoingTo(graph: graph, student: student, load: load),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The upcoming events a student is going to and lets you see. Private
+/// profiles only show theirs to people they've accepted.
+class _GoingTo extends StatefulWidget {
+  const _GoingTo({
+    required this.graph,
+    required this.student,
+    required this.load,
+  });
+
+  final SocialGraph graph;
+  final McGillian student;
+  final Future<List<ClubEvent>> Function(McGillian student) load;
+
+  @override
+  State<_GoingTo> createState() => _GoingToState();
+}
+
+class _GoingToState extends State<_GoingTo> {
+  List<ClubEvent>? _events;
+  bool _failed = false;
+  int _loads = 0;
+  (FriendStatus, int)? _loadedFor;
+
+  FriendStatus get _status => widget.graph.statusOf(widget.student);
+
+  bool get _visible =>
+      !widget.student.isPrivate || _status == FriendStatus.following;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.graph.addListener(_onGraphChanged);
+    _onGraphChanged();
+  }
+
+  @override
+  void dispose() {
+    widget.graph.removeListener(_onGraphChanged);
+    super.dispose();
+  }
+
+  /// Following someone can reveal more, once the server knows about it.
+  void _onGraphChanged() {
+    final now = (_status, widget.graph.savedConnections);
+    if (now == _loadedFor) return;
+    _loadedFor = now;
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (!_visible) {
+      setState(() => _events = null);
+      return;
+    }
+    final load = ++_loads;
+    if (_failed) setState(() => _failed = false);
+    try {
+      final events = await widget.load(widget.student);
+      if (mounted && load == _loads) setState(() => _events = events);
+    } catch (_) {
+      if (mounted && load == _loads) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_visible) return const SizedBox.shrink();
+    final text = Theme.of(context).textTheme;
+    final events = _events;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 20),
+        Text('Going to', style: text.titleLarge),
+        const SizedBox(height: 8),
+        if (events == null && _failed)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: _load,
+              child: const Text("Couldn't load their events. Try again"),
+            ),
+          )
+        else if (events == null)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (events.isEmpty)
+          const Text('No upcoming events to show.')
+        else
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (final event in events)
+                  ListTile(
+                    leading: InitialsAvatar(
+                      name: event.club.isEmpty ? event.title : event.club,
+                      diameter: 40,
+                      image: switch (event.clubAvatarUrl) {
+                        final url? => NetworkImage(url),
+                        null => null,
+                      },
+                    ),
+                    title: Text(event.title),
+                    subtitle: Text(
+                      [
+                        formatEventSchedule(context, event),
+                        event.location,
+                      ].where((part) => part.isNotEmpty).join('\n'),
+                    ),
+                    onTap: () => widget.graph.onOpenEvent?.call(event),
+                  ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

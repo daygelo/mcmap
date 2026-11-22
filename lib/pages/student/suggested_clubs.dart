@@ -186,7 +186,7 @@ List<ClubOrganization> _rankClubs(SuggestedClubs profile) {
   final fallback = <ClubOrganization>[];
   final remaining = <ClubOrganization>[];
 
-  for (final (index, club) in clubCatalog.indexed) {
+  for (final (index, club) in downtownClubCatalog.indexed) {
     final category = normalizeClubSearch(club.category);
     final metadata = [club.name, ...club.aliases, club.category]
         .map(

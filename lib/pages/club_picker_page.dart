@@ -24,7 +24,9 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final matches = clubCatalog.where((club) => club.matches(_query)).toList();
+    final matches = downtownClubCatalog
+        .where((club) => club.matches(_query))
+        .toList();
     final ordered = [
       ...matches.where((club) => widget.academicIds.contains(club.id)),
       ...matches.where((club) => !widget.academicIds.contains(club.id)),

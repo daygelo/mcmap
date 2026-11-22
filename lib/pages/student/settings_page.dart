@@ -1,14 +1,27 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../models/student_visibility.dart';
+import '../../theme/app_theme.dart';
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.rsvpVisibility});
+  const SettingsPage({
+    super.key,
+    required this.rsvpVisibility,
+    this.handle,
+    this.onSignOut,
+  });
 
   final ValueNotifier<StudentVisibility> rsvpVisibility;
 
+  /// Of the signed-in account, without the "@".
+  final String? handle;
+
+  /// Null in the offline demo, which has no account.
+  final Future<void> Function()? onSignOut;
+
   @override
   Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
@@ -18,16 +31,24 @@ class SettingsPage extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                Text(
-                  'Privacy',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                const Text('Your default resets when the app restarts.'),
-                const SizedBox(height: 20),
+                Text('Privacy', style: text.headlineSmall),
+                if (onSignOut == null) ...[
+                  const SizedBox(height: 8),
+                  const Text('Demo: your choice resets when the app restarts.'),
+                ],
+                const SizedBox(height: 16),
                 _RsvpVisibilitySection(value: rsvpVisibility),
                 const SizedBox(height: 8),
-                const Text('This default applies only to new RSVPs.'),
+                const Text(
+                  'Applies to new RSVPs. The ones you already have keep the '
+                  'audience they were made with.',
+                ),
+                if (onSignOut case final signOut?) ...[
+                  const SizedBox(height: 32),
+                  Text('Account', style: text.headlineSmall),
+                  const SizedBox(height: 16),
+                  _SignOutTile(handle: handle, onSignOut: signOut),
+                ],
               ],
             ),
           ),
@@ -37,6 +58,52 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
+class _SignOutTile extends StatefulWidget {
+  const _SignOutTile({required this.handle, required this.onSignOut});
+
+  final String? handle;
+  final Future<void> Function() onSignOut;
+
+  @override
+  State<_SignOutTile> createState() => _SignOutTileState();
+}
+
+class _SignOutTileState extends State<_SignOutTile> {
+  bool _signingOut = false;
+
+  Future<void> _signOut() async {
+    setState(() => _signingOut = true);
+    try {
+      await widget.onSignOut();
+      // The login page is now underneath.
+      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't sign out. Try again.")),
+      );
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: ListTile(
+      leading: const Icon(Icons.logout_rounded, color: McMapColors.burgundy),
+      title: Text(_signingOut ? 'Signing out…' : 'Sign out'),
+      titleTextStyle: Theme.of(context).textTheme.titleMedium,
+      subtitle: switch (widget.handle) {
+        final handle? => Text('Signed in as @$handle'),
+        null => null,
+      },
+      enabled: !_signingOut,
+      onTap: _signOut,
+    ),
+  );
+}
+
 class _RsvpVisibilitySection extends StatelessWidget {
   const _RsvpVisibilitySection({required this.value});
 
@@ -44,7 +111,7 @@ class _RsvpVisibilitySection extends StatelessWidget {
 
   static const _descriptions = {
     StudentVisibility.private: 'Only me.',
-    StudentVisibility.friends: 'Only my accepted friends.',
+    StudentVisibility.friends: 'Only McGillians who follow me.',
     StudentVisibility.public: 'Other McMap students may see my attendance.',
   };
 

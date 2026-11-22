@@ -7,11 +7,9 @@ import 'package:mcmap/models/user_profile.dart';
 const ssmu = 'mcgill-ssmu';
 const fyc = 'ssmu-first-year-council';
 const pgss = 'mcgill-pgss';
-const mcss = 'mcgill-mcss';
 const eus = 'engineering-engineering-undergraduate-society-eus';
 const ecsess =
     'engineering-electrical-computer-software-engineering-student-society-ecsess';
-const bess = 'engineering-bioresource-engineering-students-society-bess';
 const csus = 'science-csus';
 
 UserProfile profile(
@@ -20,14 +18,12 @@ UserProfile profile(
   DegreeLevel degree = DegreeLevel.undergraduate,
   String year = 'U2',
   bool newU1 = false,
-  AcademicCampus? campus,
 }) => UserProfile(
   degreeLevel: degree,
   faculty: faculty,
   major: program,
   year: degree.hasUYear ? year : null,
   firstYearAtMcGill: newU1,
-  campus: campus,
 );
 
 void main() {
@@ -93,31 +89,14 @@ void main() {
       {ssmu, 'desautels-mus'},
     ),
     (
-      'Macdonald Bioresource Engineering',
-      profile(
-        'Agricultural & Environmental Sciences',
-        'Bioresource Engineering',
-        campus: AcademicCampus.macdonald,
-      ),
-      {mcss, bess},
-    ),
-    (
-      'Bioresource Engineering entered under Engineering',
+      'Bioresource Engineering typed under Engineering',
       profile('Engineering', 'Bioresource Engineering', year: 'U0'),
-      {mcss, bess},
+      {},
     ),
     (
-      'Macdonald Dietetics fallback',
-      profile(
-        'Faculty of Agricultural and Environmental Sciences',
-        'Dietetics',
-      ),
-      {mcss, 'macdonald-dhnus'},
-    ),
-    (
-      'Macdonald Animal Science',
+      'A faculty signup no longer offers',
       profile('Agricultural & Environmental Sciences', 'Animal Science'),
-      {mcss, 'macdonald-aesus'},
+      {},
     ),
     (
       'Continuing Studies',
@@ -152,29 +131,24 @@ void main() {
       {pgss, 'engineering-eegss'},
     ),
     (
-      'Graduate Macdonald',
-      profile(
-        'Agricultural & Environmental Sciences',
-        'Plant Science',
-        degree: DegreeLevel.masters,
-        campus: AcademicCampus.macdonald,
-      ),
-      {pgss, 'mcgill-mcgss'},
-    ),
-    (
       'Undeclared Science freshman',
       profile('Faculty of Science', undeclaredMajor, year: 'U0'),
       {ssmu, 'sus', fyc, 'sus-fuss'},
     ),
     (
-      'Ambiguous cross-campus program',
+      'Environment in a downtown faculty',
       profile('Arts & Science', 'Environment'),
-      {'arts-science-asus', 'science-mess'},
+      {ssmu, 'arts-science-asus', 'science-mess'},
     ),
     (
-      'Explicit uncertain campus overrides inference',
-      profile('Science', 'Physics', campus: AcademicCampus.otherOrUnsure),
-      {'sus', 'science-msps'},
+      'Education',
+      profile('Education', 'Secondary Education'),
+      {ssmu, 'education-edus'},
+    ),
+    (
+      'Medicine is also taught in Gatineau',
+      profile('Medicine & Health Sciences', 'Medicine'),
+      {'medicine-mss'},
     ),
     ('No substring matching', profile('Arts', 'Computer Engineering'), {'aus'}),
     (
@@ -239,12 +213,8 @@ void main() {
     },
   );
 
-  test('matching defaults does not mutate follows, preferences or campus', () {
-    final input = profile(
-      'Engineering',
-      'Software Engineering',
-      campus: AcademicCampus.downtown,
-    );
+  test('matching defaults does not mutate follows or preferences', () {
+    final input = profile('Engineering', 'Software Engineering');
     final edited = input.copyWith(followedClubIds: {'manual', ssmu});
     final selected = {
       ...edited.followedClubIds,
@@ -254,7 +224,6 @@ void main() {
     expect(edited.followedClubIds, {'manual', ssmu});
     expect(edited.clubAutoRsvpOptIns, isEmpty);
     expect(edited.clubNotificationOptIns, isEmpty);
-    expect(edited.campus, AcademicCampus.downtown);
   });
 
   test(
@@ -272,4 +241,46 @@ void main() {
       }
     },
   );
+
+  test('signup offers nothing from Macdonald Campus', () {
+    expect(
+      majorsByFaculty.keys,
+      isNot(contains('Agricultural & Environmental Sciences')),
+    );
+    expect(
+      {for (final majors in majorsByFaculty.values) ...majors}.intersection({
+        'Agricultural Economics',
+        'Animal Science',
+        'Bioresource Engineering',
+        'Dietetics',
+        'Environmental Biology',
+        'Farm Management and Technology',
+        'Food Science',
+        'Global Food Security',
+        'Nutrition',
+        'Plant Science',
+      }),
+      isEmpty,
+    );
+    expect(
+      {for (final rule in academicFollowRules) rule.organizationId}
+          .intersection(macdonaldOrganizationIds),
+      isEmpty,
+    );
+    // Every Macdonald society in the catalog is accounted for, and stays there
+    // for students who already follow one.
+    expect(clubsById.keys, containsAll(macdonaldOrganizationIds));
+    expect(
+      {
+        for (final club in clubCatalog)
+          if (club.sourceKeys.contains(31) || club.name.contains('Macdonald'))
+            club.id,
+      }.difference(macdonaldOrganizationIds),
+      isEmpty,
+    );
+    expect(
+      downtownClubCatalog.length,
+      clubCatalog.length - macdonaldOrganizationIds.length,
+    );
+  });
 }

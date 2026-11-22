@@ -261,8 +261,9 @@ http.Response _jsonResponse(Object body, [int status = 200]) => http.Response(
 );
 
 Future<SupabaseBackend> _supabaseFollowing(
-  http.Response Function() response,
-) async {
+  http.Response Function() response, {
+  http.Response? Function(http.Request request)? onRequest,
+}) async {
   final client = SupabaseClient(
     'https://mcmap.test',
     'test-publishable-key',
@@ -279,13 +280,16 @@ Future<SupabaseBackend> _supabaseFollowing(
           },
         });
       }
-      expect(request.method, 'GET');
-      expect(request.url.path, '/rest/v1/profile_organization_follows');
-      expect(request.url.queryParameters, {
-        'select': 'follows',
-        'profile_id': 'eq.$_followingProfileId',
-      });
-      final result = response();
+      final custom = onRequest?.call(request);
+      if (custom == null) {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/rest/v1/profile_organization_follows');
+        expect(request.url.queryParameters, {
+          'select': 'follows',
+          'profile_id': 'eq.$_followingProfileId',
+        });
+      }
+      final result = custom ?? response();
       return http.Response(
         result.body,
         result.statusCode,
@@ -692,6 +696,120 @@ void main() {
     });
   });
 
+  for (final missing in [false, true]) {
+    test(
+      'Supabase onboarding saves choices once (missing RPC: $missing)',
+      () async {
+        const manualId = 'engineering-mcgill-robotics';
+        const firstChoice = 'mcgill-ssmu';
+        const consent = '2026-11-21T12:00:00Z';
+        final stored = <String, Object>{
+          manualId: {'auto_rsvp_enabled_at': consent},
+        };
+        var completed = false;
+        var followWrites = 0;
+        final backend = await _supabaseFollowing(
+          () => _jsonResponse([
+            {'follows': stored},
+          ]),
+          onRequest: (request) {
+            if (request.url.path == '/rest/v1/profiles') {
+              if (request.method == 'PATCH') {
+                expect(
+                  jsonDecode(request.body)['onboarding_completed'],
+                  isTrue,
+                );
+                completed = true;
+                return http.Response('', 204);
+              }
+              return _jsonResponse({
+                'id': _followingProfileId,
+                'handle': 'student',
+                'faculty': 'Science',
+                'major': 'Biology',
+                'degree_level': 'undergraduate',
+                'u_year': 'U1',
+                'onboarding_completed': completed,
+              });
+            }
+            if (request.url.path ==
+                '/rest/v1/rpc/change_organization_follows') {
+              followWrites++;
+              expect(jsonDecode(request.body), {
+                'follow_ids': [firstChoice],
+              });
+              if (missing) {
+                return _jsonResponse({
+                  'code': 'PGRST202',
+                  'message': 'Could not find the function public.change_organization_follows(follow_ids) in the schema cache',
+                }, 404);
+              }
+              stored.putIfAbsent(firstChoice, () => <String, Object>{});
+              return http.Response('', 204);
+            }
+            return null;
+          },
+        );
+        final selection = _profile.copyWith(followedClubIds: {firstChoice});
+        await backend.completeOnboarding(selection);
+        expect(completed, isTrue);
+        if (missing) {
+          final profile = (await backend.loadMyProfile()).academics!;
+          expect(profile.followedClubIds, {firstChoice, manualId});
+          expect(profile.clubAutoRsvpOptIns, {
+            manualId: DateTime.parse(consent),
+          });
+          expect(profile.clubNotificationOptIns, isEmpty);
+          expect(stored.keys, [manualId]);
+          await expectLater(
+            backend.fetchOrganizationFollows(),
+            throwsA(isA<OrganizationFollowsUnavailable>()),
+          );
+        } else {
+          expect(await backend.fetchOrganizationFollows(), {
+            firstChoice: null,
+            manualId: DateTime.parse(consent),
+          });
+          stored.remove(firstChoice); // Simulate an explicit unfollow.
+          await backend.completeOnboarding(selection);
+          expect(await backend.fetchOrganizationFollows(), {
+            manualId: DateTime.parse(consent),
+          });
+        }
+        expect(followWrites, 1);
+      },
+    );
+  }
+
+  test('onboarding does not hide Following authorization failures', () async {
+    final backend = await _supabaseFollowing(
+      () => throw StateError('Unexpected read'),
+      onRequest: (request) {
+        if (request.url.path == '/rest/v1/profiles') {
+          expect(request.method, 'GET');
+          return _jsonResponse({'onboarding_completed': false});
+        }
+        expect(request.url.path, '/rest/v1/rpc/change_organization_follows');
+        return _jsonResponse({
+          'code': '42501',
+          'message': 'permission denied',
+        }, 403);
+      },
+    );
+    await expectLater(
+      backend.completeOnboarding(
+        _profile.copyWith(followedClubIds: {'mcgill-ssmu'}),
+      ),
+      throwsA(
+        isA<PostgrestException>().having(
+          (error) => error.code,
+          'code',
+          '42501',
+        ),
+      ),
+    );
+  });
+
   group('with a backend', () {
     testWidgets('finishing onboarding saves to the backend', (tester) async {
       tester.view.physicalSize = const Size(1200, 2400);
@@ -719,6 +837,19 @@ void main() {
 
       await tester.tap(find.text('Skip for now'));
       await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Your student associations are preselected'),
+        findsOneWidget,
+      );
+      await tester.enterText(find.byType(SearchBar), 'Biology Student Union');
+      await tester.pumpAndSettle();
+      final preselected = find.widgetWithText(
+        CheckboxListTile,
+        'McGill Biology Student Union (MBSU)',
+      );
+      expect(tester.widget<CheckboxListTile>(preselected).value, isTrue);
+      await tester.tap(preselected);
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(SearchBar), 'CSUS FYC');
       await tester.pumpAndSettle();
       await tester.tap(find.text('CSUS First-Year Council'));
@@ -730,7 +861,13 @@ void main() {
       expect(backend.savedOnboarding!.year, 'U1');
       expect(backend.savedOnboarding!.isFroshie, isTrue);
       expect(backend.savedOnboarding!.interests, isEmpty);
-      expect(backend.follows, {'csus-first-year-council': null});
+      expect(backend.follows, {
+        'mcgill-ssmu': null,
+        'sus': null,
+        'ssmu-first-year-council': null,
+        'sus-fuss': null,
+        'csus-first-year-council': null,
+      });
       // Back to the gate, which reloads the profile and opens the app.
       expect(find.text('gate'), findsOneWidget);
       expect(backend.profileRevision.value, 1);

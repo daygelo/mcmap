@@ -93,6 +93,27 @@ publications after its timestamp and does not override prior RSVP decisions.
 Students can manage this preference both in **Profile → Following**
 and on an organization's details page.
 
+### Academic follows in onboarding
+
+The organization picker preselects researched student associations from
+`lib/data/academic_auto_follows.dart`. Each rule carries its catalog ID,
+eligibility, and source. The picker lets students deselect defaults or skip
+optional groups while retaining the academic selections they approved. Campus
+is an optional onboarding input. Confirmed program-campus mappings may fill
+a blank, and an uncertain or other campus leaves campus-specific defaults off.
+
+The final choices use the same Following records as manual follows. Defaults
+run only in onboarding, so later sign-ins and profile edits never re-add an
+unfollowed association. New follows leave both event preferences off.
+
+When the Following table or its write RPC is specifically unavailable,
+signed-in students can finish onboarding and see their choices for the current
+session. The Following page displays the temporary-storage notice. Permission
+or network failures still surface as save errors. The updated seed provides
+the verified catalog rows for local development. Existing deployments may
+have short legacy group slugs alongside canonical catalog slugs. Coordinate
+event and publisher links before reconciling those rows.
+
 ### Organization Following migration
 
 Apply all Supabase migrations through

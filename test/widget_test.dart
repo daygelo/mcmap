@@ -63,7 +63,9 @@ Future<void> _goToInterests(WidgetTester tester) async {
 
 Future<void> _skipClubs(WidgetTester tester) async {
   expect(find.text('Step 3 of 3'), findsOneWidget);
-  await tester.tap(find.text('Skip for now'));
+  await tester.tap(
+    find.textContaining(RegExp(r'^Skip (for now|optional groups)$')),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -469,7 +471,7 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Coding').hitTestable(), findsOneWidget);
-    await tester.tap(find.text('2 Following'));
+    await tester.tap(find.text('5 Following'));
     await tester.pumpAndSettle();
     expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
     expect(find.text('Mcgill Board Game Students’ Society'), findsOneWidget);
@@ -502,12 +504,12 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Software Engineering · U2'), findsOneWidget);
-    expect(find.text('0 Following'), findsOneWidget);
+    expect(find.text('3 Following'), findsOneWidget);
     expect(find.text('Your Club Memberships'), findsNothing);
     expect(find.text('Add Clubs'), findsNothing);
-    await tester.tap(find.text('0 Following'));
+    await tester.tap(find.text('3 Following'));
     await tester.pumpAndSettle();
-    expect(find.text("You're not following any clubs yet."), findsOneWidget);
+    expect(find.text('Students’ Society of McGill University'), findsOneWidget);
     expect(find.text('Browse Clubs'), findsOneWidget);
   });
 

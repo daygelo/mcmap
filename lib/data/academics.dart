@@ -8,6 +8,7 @@ const Map<String, List<String>> majorsByFaculty = {
     'Dietetics',
     'Environmental Biology',
     'Food Science',
+    'Farm Management and Technology',
     'Global Food Security',
     'Nutrition',
     'Plant Science',
@@ -18,6 +19,8 @@ const Map<String, List<String>> majorsByFaculty = {
     'Communication Studies',
     'Computer Science (Arts)',
     'Economics',
+    'Environment',
+    'Geography',
     'English Literature',
     'History',
     'International Development Studies',
@@ -31,10 +34,12 @@ const Map<String, List<String>> majorsByFaculty = {
     'Cognitive Science',
     'Environment',
     'Interfaculty Program',
+    'Sustainability, Science and Society',
   ],
   'Education': [
     'Kindergarten & Elementary Education',
     'Kinesiology',
+    'Music Education',
     'Physical & Health Education',
     'Secondary Education',
   ],
@@ -81,11 +86,15 @@ const Map<String, List<String>> majorsByFaculty = {
   ],
   'Science': [
     'Anatomy & Cell Biology',
+    'Atmospheric and Oceanic Sciences',
     'Biochemistry',
     'Biology',
     'Chemistry',
     'Computer Science',
     'Earth & Planetary Sciences',
+    'Earth System Science',
+    'Environment',
+    'Geography',
     'Mathematics',
     'Microbiology & Immunology',
     'Neuroscience',
@@ -138,3 +147,14 @@ final List<String> academicStandings = [
   for (final level in DegreeLevel.values)
     if (!level.hasUYear) level.shortLabel,
 ];
+
+/// Optional self-reported campus used when selecting onboarding follows.
+enum AcademicCampus {
+  downtown('Downtown'),
+  macdonald('Macdonald'),
+  otherOrUnsure('Other campus or unsure');
+
+  const AcademicCampus(this.label);
+
+  final String label;
+}

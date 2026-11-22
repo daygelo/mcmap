@@ -6,6 +6,7 @@ class UserProfile {
     required this.degreeLevel,
     required this.faculty,
     this.year,
+    this.campus,
     this.firstYearAtMcGill = false,
     this.major,
     this.interests = const {},
@@ -16,6 +17,7 @@ class UserProfile {
        assert(degreeLevel == DegreeLevel.exchangeOrContinuing || major != null);
 
   final DegreeLevel degreeLevel;
+  final AcademicCampus? campus;
 
   /// U-year ("U0"–"U4+"). Only set for undergraduates.
   final String? year;
@@ -57,6 +59,7 @@ class UserProfile {
   }) => UserProfile(
     degreeLevel: degreeLevel,
     year: year,
+    campus: campus,
     firstYearAtMcGill: firstYearAtMcGill,
     faculty: faculty,
     major: major,

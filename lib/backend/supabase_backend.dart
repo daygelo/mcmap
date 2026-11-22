@@ -16,6 +16,7 @@ class SupabaseBackend implements McMapBackend {
 
   final SupabaseClient client;
   final _profileRevision = ValueNotifier(0);
+  final _onboardingSessionFollows = <String, Map<String, DateTime?>>{};
 
   @override
   ValueListenable<int> get profileRevision => _profileRevision;
@@ -39,11 +40,32 @@ class SupabaseBackend implements McMapBackend {
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
     final uid = _uid;
+    final state = await client
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', uid)
+        .single();
+    if (state['onboarding_completed'] == true) return;
+
+    Map<String, DateTime?>? sessionFollows;
     if (profile.followedClubIds.isNotEmpty) {
-      await client.rpc<void>(
-        'change_organization_follows',
-        params: {'follow_ids': profile.followedClubIds.toList()},
-      );
+      try {
+        await client.rpc<void>(
+          'change_organization_follows',
+          params: {'follow_ids': profile.followedClubIds.toList()},
+        );
+      } on PostgrestException catch (error) {
+        if (!isMissingOrganizationFollowsTable(error) &&
+            !_isMissingChangeFollowsFunction(error)) {
+          rethrow;
+        }
+        sessionFollows = {for (final id in profile.followedClubIds) id: null};
+        try {
+          sessionFollows.addAll(await fetchOrganizationFollows());
+        } on OrganizationFollowsUnavailable {
+          // The new account can finish onboarding with session-only follows.
+        }
+      }
     }
     await client
         .from('profiles')
@@ -59,17 +81,22 @@ class SupabaseBackend implements McMapBackend {
           'onboarding_completed': true,
         })
         .eq('id', uid);
+    if (sessionFollows != null) _onboardingSessionFollows[uid] = sessionFollows;
     _profileRevision.value++;
   }
 
   @override
   Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+    final uid = _uid;
+    if (_onboardingSessionFollows.containsKey(uid)) {
+      throw const OrganizationFollowsUnavailable();
+    }
     final List<Map<String, dynamic>> rows;
     try {
       rows = await client
           .from('profile_organization_follows')
           .select('follows')
-          .eq('profile_id', _uid);
+          .eq('profile_id', uid);
     } on PostgrestException catch (error) {
       if (isMissingOrganizationFollowsTable(error)) {
         throw const OrganizationFollowsUnavailable();
@@ -100,6 +127,12 @@ class SupabaseBackend implements McMapBackend {
         ),
         _ => false,
       };
+
+  bool _isMissingChangeFollowsFunction(PostgrestException error) =>
+      error.code == 'PGRST202' &&
+      error.message.startsWith(
+        'Could not find the function public.change_organization_follows(',
+      );
 
   @override
   Future<void> setOrganizationFollow(String id, bool following) =>
@@ -323,7 +356,11 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
-  Future<void> signOut() => client.auth.signOut();
+  Future<void> signOut() async {
+    final id = client.auth.currentUser?.id;
+    await client.auth.signOut();
+    _onboardingSessionFollows.remove(id);
+  }
 
   // -------------------------------------------------------------------------
   // Row → model
@@ -333,6 +370,7 @@ class SupabaseBackend implements McMapBackend {
     final degree = degreeLevelFromDb(row['degree_level']);
     final faculty = row['faculty'] as String?;
     final done = row['onboarding_completed'] == true;
+    final sessionFollows = _onboardingSessionFollows[row['id']];
     return AccountProfile(
       id: row['id'] as String,
       handle: row['handle'] as String,
@@ -347,6 +385,12 @@ class SupabaseBackend implements McMapBackend {
               firstYearAtMcGill: row['is_first_year_u1'] == true,
               faculty: faculty,
               major: row['major'] as String?,
+              followedClubIds: sessionFollows?.keys.toSet() ?? const {},
+              clubAutoRsvpOptIns: {
+                if (sessionFollows != null)
+                  for (final entry in sessionFollows.entries)
+                    entry.key: ?entry.value,
+              },
               interests: Set.unmodifiable(
                 (row['interests'] as List? ?? const []).cast<String>(),
               ),

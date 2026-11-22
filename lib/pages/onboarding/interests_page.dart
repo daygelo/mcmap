@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../backend/mcmap_backend.dart';
 import '../../data/interests.dart';
+import '../../data/academic_auto_follows.dart';
 import '../../models/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../club_picker_page.dart';
@@ -23,6 +24,8 @@ class InterestsPage extends StatefulWidget {
 
 class _InterestsPageState extends State<InterestsPage> {
   final Set<String> _selected = {};
+  bool _finishing = false;
+  Set<String>? _reviewedFollows;
 
   void _toggle(String name) {
     setState(() {
@@ -31,39 +34,46 @@ class _InterestsPageState extends State<InterestsPage> {
   }
 
   Future<void> _continueToClubs() async {
-    final ids = await Navigator.of(context).push<Set<String>>(
-      MaterialPageRoute(builder: (_) => const ClubPickerPage()),
-    );
-    if (!mounted || ids == null) return;
-    final profile = widget.profile.copyWith(
-      interests: _selected,
-      followedClubIds: {...widget.profile.followedClubIds, ...ids},
-    );
+    if (_finishing) return;
+    setState(() => _finishing = true);
+    try {
+      final ids = await Navigator.of(context).push<Set<String>>(
+        MaterialPageRoute(
+          builder: (_) => ClubPickerPage(
+            academicIds: academicAutoFollowIds(widget.profile),
+            initialSelection: _reviewedFollows,
+          ),
+        ),
+      );
+      if (!mounted || ids == null) return;
+      _reviewedFollows = ids;
+      final profile = widget.profile.copyWith(
+        interests: _selected,
+        followedClubIds: {...widget.profile.followedClubIds, ...ids},
+      );
 
-    // Signed in: save to Supabase, then return to AuthGate, which reloads
-    // the profile and opens the app.
-    final backend = BackendScope.maybeOf(context);
-    if (backend != null) {
+      final backend = BackendScope.maybeOf(context);
       final navigator = Navigator.of(context);
-      final messenger = ScaffoldMessenger.of(context);
-      try {
+      if (backend == null) {
+        navigator.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => HomePage(profile: profile)),
+          (_) => false,
+        );
+      } else {
         await backend.completeOnboarding(profile);
-        navigator.popUntil((route) => route.isFirst);
-      } catch (_) {
-        messenger.showSnackBar(
+        if (mounted) navigator.popUntil((route) => route.isFirst);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Couldn't save your profile. Try again."),
           ),
         );
       }
-      return;
+    } finally {
+      if (mounted) setState(() => _finishing = false);
     }
-
-    // Offline demo: go straight to the app.
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => HomePage(profile: profile)),
-      (_) => false,
-    );
   }
 
   @override
@@ -135,7 +145,7 @@ class _InterestsPageState extends State<InterestsPage> {
             child: count == 0
                 ? OutlinedButton(
                     key: const ValueKey('skip'),
-                    onPressed: _continueToClubs,
+                    onPressed: _finishing ? null : _continueToClubs,
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                     ),
@@ -143,7 +153,7 @@ class _InterestsPageState extends State<InterestsPage> {
                   )
                 : FilledButton(
                     key: const ValueKey('continue'),
-                    onPressed: _continueToClubs,
+                    onPressed: _finishing ? null : _continueToClubs,
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                     ),

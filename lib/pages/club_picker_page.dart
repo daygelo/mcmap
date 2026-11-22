@@ -4,20 +4,31 @@ import '../data/clubs.dart';
 
 /// Returns a draft selection on save, or null when the student goes back.
 class ClubPickerPage extends StatefulWidget {
-  const ClubPickerPage({super.key});
+  const ClubPickerPage({
+    super.key,
+    this.academicIds = const {},
+    this.initialSelection,
+  });
+
+  final Set<String> academicIds;
+  final Set<String>? initialSelection;
 
   @override
   State<ClubPickerPage> createState() => _ClubPickerPageState();
 }
 
 class _ClubPickerPageState extends State<ClubPickerPage> {
-  final _selected = <String>{};
+  late final _selected = {...(widget.initialSelection ?? widget.academicIds)};
   String _query = '';
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final matches = clubCatalog.where((club) => club.matches(_query)).toList();
+    final ordered = [
+      ...matches.where((club) => widget.academicIds.contains(club.id)),
+      ...matches.where((club) => !widget.academicIds.contains(club.id)),
+    ];
     return Scaffold(
       appBar: AppBar(title: const Text('Step 3 of 3')),
       body: SafeArea(
@@ -40,6 +51,12 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
                         const Text(
                           'Follow McGill clubs, departments, and organizations to see their events. You can always change this later.',
                         ),
+                        if (widget.academicIds.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Your student associations are preselected. You can unselect any of them.',
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         SearchBar(
                           hintText: 'Search clubs by name or alias',
@@ -65,13 +82,17 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
                     ),
                   ),
                 SliverList.builder(
-                  itemCount: matches.length,
+                  itemCount: ordered.length,
                   itemBuilder: (context, index) {
-                    final club = matches[index];
+                    final club = ordered[index];
                     return CheckboxListTile(
                       key: ValueKey(club.id),
                       title: Text(club.name),
-                      subtitle: Text('${club.type.label} · ${club.category}'),
+                      subtitle: Text(
+                        widget.academicIds.contains(club.id)
+                            ? 'Student association · ${club.category}'
+                            : '${club.type.label} · ${club.category}',
+                      ),
                       value: _selected.contains(club.id),
                       onChanged: (selected) => setState(() {
                         if (selected == true) {
@@ -97,14 +118,18 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
             runSpacing: 8,
             children: [
               OutlinedButton(
-                onPressed: () => Navigator.of(context).pop(const <String>{}),
-                child: const Text('Skip for now'),
+                onPressed: () =>
+                    Navigator.of(context)
+                        .pop(_selected.intersection(widget.academicIds)),
+                child: Text(
+                  widget.academicIds.isEmpty
+                      ? 'Skip for now'
+                      : 'Skip optional groups',
+                ),
               ),
               FilledButton(
-                onPressed: _selected.isEmpty
-                    ? null
-                    : () =>
-                          Navigator.of(context).pop(Set<String>.of(_selected)),
+                onPressed: () =>
+                    Navigator.of(context).pop(Set<String>.of(_selected)),
                 child: const Text('Continue'),
               ),
             ],

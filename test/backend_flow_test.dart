@@ -11,11 +11,14 @@ import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/backend/mcmap_backend.dart';
 import 'package:mcmap/backend/supabase_backend.dart';
+import 'package:mcmap/backend/organizer_backend.dart';
 import 'package:mcmap/data/academics.dart';
 import 'package:mcmap/data/campus_groups.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/main.dart';
+import 'package:mcmap/models/app_notification.dart';
 import 'package:mcmap/models/club_event.dart';
+import 'package:mcmap/models/friend_rsvps.dart';
 import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/event_details_page.dart';
@@ -23,10 +26,14 @@ import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/map_page.dart';
 import 'package:mcmap/pages/login_page.dart';
 import 'package:mcmap/pages/onboarding/interests_page.dart';
+import 'package:mcmap/pages/onboarding/academic_info_page.dart';
+import 'package:mcmap/pages/onboarding/account_purpose_page.dart';
+import 'package:mcmap/pages/onboarding/organizer_page.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/social/social_graph.dart';
 import 'package:mcmap/theme/app_theme.dart';
+import 'package:mcmap/widgets/map_compass.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// In-memory stand-in for Supabase that records what the app saved.
@@ -38,12 +45,20 @@ class FakeBackend implements McMapBackend {
   final added = <String>[];
   final removed = <String>[];
   bool failRsvp = false;
+  bool failRsvpPrivacy = false;
+  Completer<void>? pendingRsvpPrivacy;
+  int privacyWrites = 0;
+  StudentVisibility rsvpPrivacy = StudentVisibility.private;
+  final savedRsvps = <String, StudentVisibility>{};
+  final visibleProfileEvents = <String, List<ClubEvent>>{};
+  final visibleAttendees = <String, List<RsvpFriend>>{};
   bool failFollowSave = false;
   Exception? followLoadError;
   Future<Map<String, DateTime?>> Function()? followLoader;
   int followWrites = 0;
   int autoRsvpWrites = 0;
   final follows = <String, DateTime?>{};
+  final notificationOptIns = <String, DateTime>{};
   List<PublishingGroup> publishingGroups = [];
   Completer<void>? publicationPending;
   int publicationCalls = 0;
@@ -87,8 +102,27 @@ class FakeBackend implements McMapBackend {
   ValueListenable<int> get profileRevision => _revision;
 
   @override
-  Future<AccountProfile> loadMyProfile() async =>
-      const AccountProfile(id: 'me', handle: 'me', fullName: 'Me');
+  Future<Map<String, DateTime>> fetchOrganizationNotificationOptIns() async => {
+    ...notificationOptIns,
+  };
+
+  @override
+  Future<DateTime?> setOrganizationNotifications(
+    String id,
+    bool enabled,
+  ) async {
+    if (enabled) return notificationOptIns.putIfAbsent(id, DateTime.now);
+    notificationOptIns.remove(id);
+    return null;
+  }
+
+  @override
+  Future<AccountProfile> loadMyProfile() async => AccountProfile(
+    id: 'me',
+    handle: 'me',
+    fullName: 'Me',
+    rsvpVisibility: rsvpPrivacy,
+  );
 
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
@@ -113,6 +147,7 @@ class FakeBackend implements McMapBackend {
       follows.putIfAbsent(id, () => null);
     } else {
       follows.remove(id);
+      notificationOptIns.remove(id);
     }
   }
 
@@ -181,13 +216,104 @@ class FakeBackend implements McMapBackend {
   }
 
   @override
-  Future<Map<String, StudentVisibility>> fetchMyRsvps() async => {};
+  Future<Map<String, StudentVisibility>> fetchMyRsvps() async => {
+    ...savedRsvps,
+  };
+
+  Map<String, FriendRsvps> friendRsvps = const {};
+  int friendRsvpLoads = 0;
 
   @override
-  Future<void> setRsvp(String eventId, StudentVisibility? visibility) async {
+  Future<Map<String, FriendRsvps>> fetchFriendRsvps() async {
+    friendRsvpLoads++;
+    return friendRsvps;
+  }
+
+  @override
+  Future<ClubEvent?> fetchEvent(String id) async =>
+      unlistedEvents.where((event) => event.id == id).firstOrNull;
+
+  /// Posted after the feed loaded.
+  final unlistedEvents = <ClubEvent>[];
+  var notifications = <AppNotification>[];
+  bool failNotifications = false;
+  bool failMarkRead = false;
+  int notificationRefreshes = 0;
+  final readCalls = <String?>[];
+  final notificationChanges = StreamController<void>.broadcast();
+
+  @override
+  Future<List<AppNotification>> fetchNotifications() async {
+    if (failNotifications) throw Exception('offline');
+    return [...notifications];
+  }
+
+  @override
+  Future<void> refreshNotifications() async => notificationRefreshes++;
+
+  @override
+  Future<void> markNotificationsRead({String? id}) async {
+    readCalls.add(id);
+    if (failMarkRead) throw Exception('offline');
+    notifications = [
+      for (final item in notifications)
+        id == null || item.id == id ? item.asRead() : item,
+    ];
+  }
+
+  @override
+  Stream<void> watchNotifications() => notificationChanges.stream;
+
+  @override
+  Future<StudentVisibility?> setRsvp(
+    String eventId, {
+    required bool going,
+  }) async {
+    final visibility = going ? rsvpPrivacy : null;
     rsvpCalls.add((eventId, visibility));
     if (failRsvp) throw Exception('offline');
+    if (visibility == null) {
+      savedRsvps.remove(eventId);
+    } else {
+      savedRsvps[eventId] = visibility;
+    }
+    return visibility;
   }
+
+  final visibilitySaves = <StudentVisibility>[];
+  int rsvpsOfLoads = 0;
+  bool failRsvpsOf = false;
+
+  @override
+  Future<StudentVisibility> setRsvpVisibility(
+    StudentVisibility visibility,
+  ) async {
+    privacyWrites++;
+    await pendingRsvpPrivacy?.future;
+    if (failRsvpPrivacy) throw Exception('offline');
+    visibilitySaves.add(visibility);
+    rsvpPrivacy = visibility;
+    savedRsvps.updateAll((_, _) => visibility);
+    return visibility;
+  }
+
+  @override
+  Future<McGillian?> fetchMcGillian(String profileId) async =>
+      [priya, sam].where((student) => student.id == profileId).firstOrNull;
+
+  @override
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId) async {
+    rsvpsOfLoads++;
+    if (failRsvpsOf) throw Exception('offline');
+    return (visibleProfileEvents[profileId] ?? const <ClubEvent>[])
+        .where((event) => event.isUpcomingAt(DateTime.now()))
+        .toList()
+      ..sort((a, b) => a.startsAt!.compareTo(b.startsAt!));
+  }
+
+  @override
+  Future<List<RsvpFriend>> fetchEventAttendees(String eventId) async =>
+      visibleAttendees[eventId] ?? const [];
 
   @override
   Future<List<McGillian>> searchMcGillians(String query) async => [
@@ -312,7 +438,386 @@ Future<SupabaseBackend> _supabaseFollowing(
   return SupabaseBackend(client);
 }
 
+class FakeOrganizerBackend extends FakeBackend implements OrganizerBackend {
+  static const directory = [
+    CampusGroup(
+      id: 'science',
+      uuid: 'faculty-uuid',
+      name: 'Faculty of Science',
+      type: OrganizationType.faculty,
+    ),
+    CampusGroup(
+      id: 'sus',
+      uuid: 'society-uuid',
+      name: 'Science Undergraduate Society',
+      type: OrganizationType.studentSociety,
+    ),
+    CampusGroup(
+      id: 'robots',
+      uuid: 'club-uuid',
+      name: 'Robotics Club',
+      type: OrganizationType.club,
+    ),
+    CampusGroup(
+      id: 'research',
+      uuid: 'research-uuid',
+      name: 'Campus Research Group',
+      type: OrganizationType.researchGroup,
+    ),
+  ];
+
+  List<OrganizerApplication> applications = [];
+  ExecutiveDetails? submitted;
+
+  @override
+  Future<List<CampusGroup>> fetchOrganizerDirectory() async => directory;
+
+  @override
+  Future<List<OrganizerApplication>> fetchOrganizerApplications() async =>
+      applications;
+
+  @override
+  Future<String> sendExecutiveCode(ExecutiveDetails details) async {
+    submitted = details;
+    setStatus(OrganizerStatus.verifyEmail);
+    return 'application-id';
+  }
+
+  void setStatus(OrganizerStatus status) {
+    applications = [
+      OrganizerApplication(
+        id: 'application-id',
+        details: submitted!,
+        organization: 'Faculty of Science',
+        status: status,
+      ),
+    ];
+    publishingGroups = [
+      if (status == OrganizerStatus.approved)
+        const PublishingGroup(id: 'faculty-uuid', name: 'Faculty of Science'),
+    ];
+  }
+
+  @override
+  Future<void> verifyExecutiveCode({
+    required String applicationId,
+    required String groupId,
+    required String code,
+  }) async {
+    expect((applicationId, groupId), ('application-id', 'faculty-uuid'));
+    if (code != '12345678') {
+      throw const OrganizerRequestError('That code is incorrect.');
+    }
+    setStatus(OrganizerStatus.pendingReview);
+  }
+
+  @override
+  Future<void> requestOrganization(
+    String name,
+    OrganizerCategory category,
+  ) async {}
+
+  @override
+  Future<void> completeOrganizerOnboarding() async {}
+}
+
 void main() {
+  testWidgets('account purpose keeps the existing Student entry point', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => AccountPurposePage(
+            onStudent: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const AcademicInfoPage()),
+            ),
+            onOrganizer: () {},
+            onSignOut: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('How will you use McMap?'), findsOneWidget);
+    expect(find.text('Faculty / Club Executive'), findsOneWidget);
+    await tester.tap(find.text('Student'));
+    await tester.pumpAndSettle();
+    expect(find.text('What do you study?'), findsOneWidget);
+  });
+
+  testWidgets('executive directory filters by type and submits by UUID', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = FakeOrganizerBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrganizerPage(
+          backend: backend,
+          fullName: 'Faculty Staff',
+          onboarding: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final (category, group) in [
+      ('Student association / society', 'Science Undergraduate Society'),
+      ('Club', 'Robotics Club'),
+      ('Other recognized organization', 'Campus Research Group'),
+    ]) {
+      await tester.tap(find.text(category));
+      await tester.pumpAndSettle();
+      expect(find.text(group), findsOneWidget);
+      expect(find.text('Faculty of Science'), findsNothing);
+      await tester.tap(find.text('Change organization type'));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('Faculty'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Science');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('science')), findsOneWidget);
+    expect(find.text('Robotics Club'), findsNothing);
+    await tester.tap(find.text('Faculty of Science'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Official role'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Faculty representative').last);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Executive email address'),
+      'Office@Example.org',
+    );
+    await tester.tap(find.text('Send verification code'));
+    await tester.pumpAndSettle();
+    expect(backend.submitted, (
+      groupId: 'faculty-uuid',
+      fullName: 'Faculty Staff',
+      email: 'office@example.org',
+      role: ExecutiveRole.facultyRepresentative,
+    ));
+    expect(find.text('Verify your executive email'), findsOneWidget);
+    final codeField = find.widgetWithText(TextFormField, 'Verification code');
+    await tester.enterText(codeField, '00000000');
+    await tester.tap(find.text('Verify email'));
+    await tester.pumpAndSettle();
+    expect(find.text('That code is incorrect.'), findsOneWidget);
+    await tester.enterText(codeField, '12345678');
+    await tester.tap(find.text('Verify email'));
+    await tester.pumpAndSettle();
+    expect(find.text('Awaiting approval'), findsOneWidget);
+    expect(find.text('Continue to McMap'), findsOneWidget);
+    expect(backend.publishingGroups, isEmpty);
+  });
+
+  testWidgets(
+    'existing students retain academics while publisher access changes',
+    (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final backend = FakeOrganizerBackend()
+        ..submitted = (
+          groupId: 'faculty-uuid',
+          fullName: 'Existing Student',
+          email: 'office@example.org',
+          role: ExecutiveRole.coordinator,
+        )
+        ..setStatus(OrganizerStatus.pendingReview);
+      final account = AccountProfile(
+        id: 'student-account',
+        handle: 'student',
+        fullName: 'Existing Student',
+        academics: _profile,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomePage(
+            backend: backend,
+            account: account,
+            profile: account.academics,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Create'), findsNothing);
+      await tester.tap(find.text('Profile').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Organizer settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Awaiting approval'), findsOneWidget);
+      backend.setStatus(OrganizerStatus.approved);
+      await tester.tap(find.byTooltip('Refresh organizer status'));
+      await tester.pumpAndSettle();
+      expect(find.text('Verified organizer'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Create'), findsOneWidget);
+      expect(find.textContaining(_profile.major!), findsWidgets);
+      await tester.tap(find.text('Create'));
+      await tester.pumpAndSettle();
+      backend.setStatus(OrganizerStatus.revoked);
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      expect(find.text('Create'), findsNothing);
+      await tester.tap(find.text('Organizer settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Publishing access revoked'), findsOneWidget);
+      expect(find.text('Apply again'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('staff profile displays the account without demo academics', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HomePage(
+          account: AccountProfile(
+            id: 'staff',
+            handle: 'staff',
+            fullName: 'Faculty Staff',
+            onboardingCompleted: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Faculty Staff'), findsOneWidget);
+    expect(find.text('Software Engineering · U0'), findsNothing);
+    expect(find.text('Faculty of Engineering'), findsNothing);
+  });
+
+  test('organizer completion leaves academic columns empty and can load the profile', () async {
+    final row = <String, dynamic>{
+      'id': _followingProfileId,
+      'handle': 'staff',
+      'full_name': 'Faculty Staff',
+      'onboarding_completed': false,
+    };
+    final backend = await _supabaseFollowing(
+      () => throw StateError('Unexpected request'),
+      onRequest: (request) {
+        expect(request.url.path, '/rest/v1/profiles');
+        if (request.method == 'PATCH') {
+          final changes = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(changes, {
+            'account_purpose': 'organizer',
+            'onboarding_completed': true,
+          });
+          row.addAll(changes);
+          return http.Response('', 204);
+        }
+        return _jsonResponse(row);
+      },
+    );
+    await backend.completeOrganizerOnboarding();
+    final profile = await backend.loadMyProfile();
+    expect(profile.onboardingCompleted, isTrue);
+    expect(profile.academics, isNull);
+  });
+
+  test(
+    'executive verification uses the current session and a separate email',
+    () async {
+      var attempts = 0;
+      final backend = await _supabaseFollowing(
+        () => throw StateError('Unexpected request'),
+        onRequest: (request) {
+          expect(request.url.path, '/functions/v1/organizer-verification');
+          expect(
+            request.headers['authorization'],
+            'Bearer eyJhbGciOiJub25lIn0.e30.fake',
+          );
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['group_id'], 'group-uuid');
+          if (body['action'] == 'send') {
+            expect(body['email'], 'executive@example.org');
+            return _jsonResponse({
+              'status': 'code_sent',
+              'id': 'application-id',
+            });
+          }
+          expect(body['id'], 'application-id');
+          return _jsonResponse({
+            'status': ++attempts == 1 ? 'expired' : 'pending_review',
+          });
+        },
+      );
+      final session = backend.client.auth.currentSession;
+      final id = await backend.sendExecutiveCode((
+        groupId: 'group-uuid',
+        fullName: 'Faculty Staff',
+        email: 'executive@example.org',
+        role: ExecutiveRole.facultyRepresentative,
+      ));
+      Future<void> verify() => backend.verifyExecutiveCode(
+        applicationId: id,
+        groupId: 'group-uuid',
+        code: '12345678',
+      );
+      await expectLater(
+        verify(),
+        throwsA(
+          isA<OrganizerRequestError>().having(
+            (error) => error.message,
+            'message',
+            contains('expired'),
+          ),
+        ),
+      );
+      await verify();
+      expect(backend.client.auth.currentSession, same(session));
+    },
+  );
+
+  test(
+    'executive verification gives safe and distinct delivery errors',
+    () async {
+      const details = (
+        groupId: 'group-uuid',
+        fullName: 'Faculty Staff',
+        email: 'executive@example.org',
+        role: ExecutiveRole.facultyRepresentative,
+      );
+      http.Response Function() reply = () => _jsonResponse({});
+      final backend = await _supabaseFollowing(
+        () => throw StateError('Unexpected request'),
+        onRequest: (_) => reply(),
+      );
+      Future<void> expectError(String text) => expectLater(
+        backend.sendExecutiveCode(details),
+        throwsA(
+          isA<OrganizerRequestError>().having(
+            (error) => error.message,
+            'message',
+            contains(text),
+          ),
+        ),
+      );
+      for (final (httpStatus, status, message) in [
+        (404, 'NOT_FOUND', 'not set up'),
+        (401, 'sign_in_required', 'Sign in again'),
+        (503, 'email_unavailable', 'could not confirm'),
+        (429, 'email_rate_limited', 'temporarily limited'),
+        (400, 'invalid_email', 'valid executive email'),
+        (200, 'attempts_exhausted', 'Too many incorrect attempts'),
+        (200, 'code_sent', 'temporarily unavailable'),
+        (200, 'pending_review', 'temporarily unavailable'),
+      ]) {
+        reply = () => _jsonResponse({'status': status}, httpStatus);
+        await expectError(message);
+      }
+      reply = () => throw http.ClientException('private transport details');
+      await expectError('Check your connection');
+    },
+  );
+
   test('only a missing Following table matches the Supabase fallback', () {
     const schemaCache = PostgrestException(
       code: 'PGRST205',
@@ -510,7 +1015,10 @@ void main() {
     expect(
       tester
           .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.my_location_rounded),
+            find.descendant(
+              of: find.byType(MapCompass),
+              matching: find.byType(IconButton),
+            ),
           )
           .onPressed,
       isNull,
@@ -1003,6 +1511,86 @@ void main() {
       expect(find.text('Cancel RSVP'), findsOneWidget);
       expect(find.textContaining("Couldn't save your RSVP"), findsOneWidget);
     });
+
+    testWidgets(
+      'global RSVP privacy confirms, saves, rolls back, and reloads',
+      (tester) async {
+        final backend = await _pumpHome(tester);
+        const secondId = 'e2';
+        backend.events.add(
+          ClubEvent(
+            secondId,
+            'Second Server Event',
+            'SSMU',
+            '',
+            'Campus',
+            startsAt: DateTime.now().add(const Duration(days: 3)),
+          ),
+        );
+        Future<void> tap(Finder finder) async {
+          await tester.tap(finder);
+          await tester.pumpAndSettle();
+        }
+
+        StudentVisibility? selected() => tester
+            .widget<RadioGroup<StudentVisibility>>(
+              find.byType(RadioGroup<StudentVisibility>),
+            )
+            .groupValue;
+
+        await tap(find.text('RSVP'));
+        expect(backend.savedRsvps, {'e1': StudentVisibility.private});
+        await tap(find.byTooltip('Settings'));
+        expect(selected(), StudentVisibility.private);
+
+        backend.pendingRsvpPrivacy = Completer<void>();
+        await tap(find.text('Friends'));
+        expect(selected(), StudentVisibility.private);
+        expect(backend.privacyWrites, 1);
+        await tap(find.text('Public'));
+        expect(backend.privacyWrites, 1);
+
+        backend.pendingRsvpPrivacy!.complete();
+        await tester.pumpAndSettle();
+        expect(selected(), StudentVisibility.friends);
+        expect(backend.savedRsvps, {'e1': StudentVisibility.friends});
+
+        await tap(find.text('Public'));
+        expect(find.text('Make all RSVPs public?'), findsOneWidget);
+        await tap(find.text('Cancel'));
+        expect(backend.privacyWrites, 1);
+        expect(selected(), StudentVisibility.friends);
+
+        backend.failRsvpPrivacy = true;
+        await tap(find.text('Public'));
+        await tap(find.text('Make public'));
+        expect(selected(), StudentVisibility.friends);
+        expect(backend.savedRsvps, {'e1': StudentVisibility.friends});
+        expect(
+          find.textContaining("Couldn't confirm your RSVP privacy"),
+          findsOneWidget,
+        );
+
+        backend.failRsvpPrivacy = false;
+        await tap(find.text('Public'));
+        await tap(find.text('Make public'));
+        expect(selected(), StudentVisibility.public);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _pumpHome(tester, existingBackend: backend);
+        await tap(find.byTooltip('Settings'));
+        expect(selected(), StudentVisibility.public);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(find.text('Cancel RSVP'), findsOneWidget);
+        await tap(find.text('RSVP'));
+        expect(backend.savedRsvps, {
+          'e1': StudentVisibility.public,
+          secondId: StudentVisibility.public,
+        });
+        expect(backend.rsvpCalls.length, 2);
+      },
+    );
 
     testWidgets('McGillians come from the server and sync changes', (
       tester,

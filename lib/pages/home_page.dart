@@ -5,17 +5,22 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
-import '../data/academics.dart';
+import '../backend/organizer_backend.dart';
 import '../data/campus_groups.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
+import '../models/app_notification.dart';
 import '../models/club_event.dart';
+import '../models/friend_rsvps.dart';
 import '../models/student_visibility.dart';
 import '../services/local_rsvps.dart';
+import '../services/notification_center.dart';
 import 'all_events_page.dart';
 import 'create_event_page.dart';
 import 'event_details_page.dart';
 import 'map_page.dart';
+import 'onboarding/academic_info_page.dart';
+import 'onboarding/organizer_page.dart';
 import 'organization_page.dart';
 import 'student/club_discovery.dart';
 import 'student/edit_profile_page.dart';
@@ -27,10 +32,14 @@ import 'student/student_profile.dart';
 import '../social/mcgillian_widgets.dart';
 import '../social/social_graph.dart';
 import '../widgets/event_bits.dart';
+import '../widgets/friend_rsvp_pill.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/group_type_badge.dart';
 import '../widgets/initials_avatar.dart';
 import '../widgets/mcmap_logo.dart';
+import '../widgets/notification_bell.dart';
+import '../widgets/notifications_drawer.dart';
+import '../widgets/pull_to_refresh.dart';
 
 /// Quick filters under the search bar.
 enum _SearchScope {
@@ -86,6 +95,11 @@ class _HomePageState extends State<HomePage> {
       for (final event in _sampleEvents) event.id: event,
   };
   bool _loadingEvents = false;
+
+  /// Also true while refreshing, when the feed stays on screen.
+  bool _fetchingEvents = false;
+  Future<void>? _refreshing;
+
   Future<bool>? _organizationFollowsLoad;
   bool _usingLocalOrganizationFollows = false;
   final _pendingOrganizationChanges = <String>{};
@@ -108,17 +122,16 @@ class _HomePageState extends State<HomePage> {
   final _clubRevision = ValueNotifier(0);
   StreamSubscription<ClubEvent>? _publications;
 
-  // Club relationships live in UserProfile. StudentProfile remains the
-  // editable presentation, including Gabby's local photo and standing.
-  late UserProfile _clubProfile =
-      widget.profile ??
-      const UserProfile(
-        degreeLevel: DegreeLevel.undergraduate,
-        faculty: 'Faculty of Engineering',
-        major: 'Software Engineering',
-        year: 'U0',
-      );
-  final _rsvpVisibility = ValueNotifier(StudentVisibility.private);
+  late OrganizationPreferences _clubProfile =
+      widget.profile ?? const OrganizationPreferences();
+  late final _rsvpVisibility = ValueNotifier(
+    widget.account?.rsvpVisibility ?? StudentVisibility.private,
+  );
+  final _pendingRsvps = <String>{};
+  bool _savingRsvpVisibility = false;
+  bool _loadingAttendance = false;
+  bool _reloadAttendance = false;
+  int _attendanceWrites = 0;
   late StudentProfile _profile = switch (widget.profile) {
     final profile? => StudentProfile(
       name: switch (widget.account?.fullName.trim()) {
@@ -134,14 +147,33 @@ class _HomePageState extends State<HomePage> {
       avatarUrl: widget.account?.avatarUrl,
       handle: widget.account?.handle,
     ),
+    null when widget.account != null => StudentProfile(
+      name: widget.account!.fullName.trim().isEmpty
+          ? 'McMap Organizer'
+          : widget.account!.fullName,
+      faculty: '',
+      major: '',
+      year: '',
+      bio: widget.account!.bio,
+      avatarUrl: widget.account!.avatarUrl,
+      handle: widget.account!.handle,
+    ),
     null => const StudentProfile(),
   };
   late final SocialGraph _social = switch (widget.backend) {
     final backend? => SocialGraph.remote(backend),
     null => SocialGraph(),
   };
+  late final NotificationCenter _notifications = switch (widget.backend) {
+    final backend? => NotificationCenter.remote(backend),
+    null => NotificationCenter.local(_sampleNotifications()),
+  };
+  Map<String, FriendRsvps> _friendRsvps = const {};
+  int _friendRsvpLoads = 0;
+  late final AppLifecycleListener _lifecycle;
   final _homeScroll = ScrollController();
   final _suggestedEventsHeading = GlobalKey();
+  final _scaffold = GlobalKey<ScaffoldState>();
   final _homeSearch = TextEditingController();
   final _searchFocus = FocusNode();
   String _query = '';
@@ -150,6 +182,8 @@ class _HomePageState extends State<HomePage> {
   _Destination _destination = _Destination.home;
   bool _hasOpenedMap = false;
   List<PublishingGroup> _publishingGroups = const [];
+  Timer? _publishingRefresh;
+  int _publishingLoadRevision = 0;
   final _publishedDuringLoad = <String, ClubEvent>{};
 
   List<_Destination> get _destinations => [
@@ -181,32 +215,116 @@ class _HomePageState extends State<HomePage> {
     _clubRevision.value++;
   }
 
-  void _toggleRsvp(ClubEvent event) {
+  Future<void> _toggleRsvp(ClubEvent event) async {
     final current = _events[event.id] ?? event;
-    if (_rsvps.visibilityFor(event.id) == null &&
-        !current.canRsvpAt(DateTime.now())) {
+    final previous = _rsvps.visibilityFor(event.id);
+    if (_savingRsvpVisibility ||
+        (previous == null && !current.canRsvpAt(DateTime.now())) ||
+        !_pendingRsvps.add(event.id)) {
       return;
     }
-    final previous = _rsvps.visibilityFor(event.id);
+    _attendanceWrites++;
     _changeClubState(() => _rsvps.toggle(event.id, _rsvpVisibility.value));
-    final backend = widget.backend;
-    if (backend == null) return;
-    backend.setRsvp(event.id, _rsvps.visibilityFor(event.id)).catchError((
-      Object _,
-    ) {
+    try {
+      final backend = widget.backend;
+      if (backend == null) return;
+      final saved = await backend.setRsvp(event.id, going: previous == null);
+      if (!mounted) return;
+      _changeClubState(() => _rsvps.set(event.id, saved));
+      if (saved != null && saved != _rsvpVisibility.value) {
+        _reloadAttendance = true;
+      }
+      _social.refreshAttendance();
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.refresh());
+    } catch (_) {
       if (!mounted) return;
       _changeClubState(() => _rsvps.set(event.id, previous));
-      _showError("Couldn't save your RSVP. Try again.");
-    });
+      _showError(
+        "Couldn't save your RSVP. Check your connection and try again.",
+      );
+    } finally {
+      _pendingRsvps.remove(event.id);
+      if (mounted && _reloadAttendance && _pendingRsvps.isEmpty) {
+        unawaited(_refreshAttendance());
+      }
+    }
+  }
+
+  Future<void> _saveRsvpVisibility(StudentVisibility selection) async {
+    if (_savingRsvpVisibility || _pendingRsvps.isNotEmpty) {
+      throw StateError('An RSVP is still being saved');
+    }
+    _savingRsvpVisibility = true;
+    _attendanceWrites++;
+    try {
+      final saved =
+          await (widget.backend?.setRsvpVisibility(selection) ??
+              Future.value(selection));
+      if (!mounted) return;
+      _changeClubState(() {
+        _rsvpVisibility.value = saved;
+        _rsvps.applyVisibility(saved);
+      });
+      _social.refreshAttendance();
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.refresh());
+    } finally {
+      _savingRsvpVisibility = false;
+      if (mounted && widget.backend != null) unawaited(_refreshAttendance());
+    }
+  }
+
+  Future<void> _refreshAttendance() async {
+    final backend = widget.backend;
+    if (backend == null || !mounted) return;
+    if (_loadingAttendance ||
+        _savingRsvpVisibility ||
+        _pendingRsvps.isNotEmpty) {
+      _reloadAttendance = true;
+      return;
+    }
+    _reloadAttendance = false;
+    _loadingAttendance = true;
+    final revision = _attendanceWrites;
+    try {
+      final (account, rsvps) = await (
+        backend.loadMyProfile(),
+        backend.fetchMyRsvps(),
+      ).wait;
+      if (!mounted) return;
+      if (revision != _attendanceWrites ||
+          _savingRsvpVisibility ||
+          _pendingRsvps.isNotEmpty) {
+        _reloadAttendance = true;
+        return;
+      }
+      _changeClubState(() {
+        _rsvpVisibility.value = account.rsvpVisibility;
+        _rsvps.restore(rsvps);
+      });
+    } catch (_) {
+      // Keep the last confirmed state and retry when the app resumes.
+    } finally {
+      _loadingAttendance = false;
+      if (mounted &&
+          _reloadAttendance &&
+          !_savingRsvpVisibility &&
+          _pendingRsvps.isEmpty) {
+        unawaited(_refreshAttendance());
+      }
+    }
   }
 
   Future<bool> _loadOrganizationFollows(McMapBackend backend) async {
     try {
       final follows = await backend.fetchOrganizationFollows();
+      final notifications = await backend.fetchOrganizationNotificationOptIns();
       if (!mounted) return false;
       _changeClubState(() {
         _clubProfile = _clubProfile.copyWith(
           followedClubIds: follows.keys.toSet(),
+          clubNotificationOptIns: notifications,
           clubAutoRsvpOptIns: {
             for (final entry in follows.entries) entry.key: ?entry.value,
           },
@@ -335,18 +453,36 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _setNotifications(String id, bool enabled) {
-    if (!_clubProfile.followedClubIds.contains(id)) return;
-    final optIns = {..._clubProfile.clubNotificationOptIns};
-    if (enabled) {
-      optIns.putIfAbsent(id, DateTime.now);
-    } else {
-      optIns.remove(id);
+  Future<void> _setNotifications(String id, bool enabled) async {
+    if (!_clubProfile.followedClubIds.contains(id) ||
+        !_pendingOrganizationChanges.add(id)) {
+      return;
     }
-    _changeClubState(
-      () =>
-          _clubProfile = _clubProfile.copyWith(clubNotificationOptIns: optIns),
-    );
+    try {
+      final backend = widget.backend;
+      final consent = backend == null || _usingLocalOrganizationFollows
+          ? (enabled ? DateTime.now() : null)
+          : await backend.setOrganizationNotifications(id, enabled);
+      if (!mounted) return;
+      final optIns = {..._clubProfile.clubNotificationOptIns};
+      if (consent == null) {
+        optIns.remove(id);
+      } else {
+        optIns[id] = consent;
+      }
+      _changeClubState(
+        () => _clubProfile = _clubProfile.copyWith(
+          clubNotificationOptIns: optIns,
+        ),
+      );
+    } catch (_) {
+      _showError(
+        "Couldn't save event notifications. Check your connection and try again.",
+      );
+    } finally {
+      _pendingOrganizationChanges.remove(id);
+      if (mounted) _clubRevision.value++;
+    }
   }
 
   @override
@@ -357,21 +493,69 @@ class _HomePageState extends State<HomePage> {
       _showError("Couldn't update your McGillians.");
     };
     _social.addListener(_onSocialChanged);
+    _social.loadGoing = _loadDemoGoing;
+    _social.onOpenEvent = (event) {
+      _changeClubState(() => _events.putIfAbsent(event.id, () => event));
+      _openEvent(event);
+    };
+    _social.onConnectionsSaved = () {
+      _social.refreshAttendance();
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.refresh());
+    };
+    _notifications.onSaveFailed = () =>
+        _showError("Couldn't mark that as read. Try again.");
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        _social.refreshAttendance();
+        unawaited(_refreshAttendance());
+        unawaited(_notifications.refresh());
+        unawaited(_loadFriendRsvps());
+      },
+    );
     _listenForPublications();
     if (widget.backend case final backend?) {
       unawaited(_loadFromServer());
+      unawaited(_refreshAttendance());
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.start());
       _organizationFollowsLoad = _loadOrganizationFollows(backend);
       unawaited(_loadOrganizations(backend));
     }
     if (widget.account != null && widget.backend != null) {
-      unawaited(_loadPublishingGroups(widget.backend!));
+      _refreshPublishingGroups();
+      if (widget.backend is OrganizerBackend) {
+        _publishingRefresh = Timer.periodic(
+          const Duration(seconds: 30),
+          (_) => _refreshPublishingGroups(),
+        );
+      }
+    }
+  }
+
+  void _refreshPublishingGroups() {
+    if (widget.backend case final backend?) {
+      unawaited(_loadPublishingGroups(backend));
     }
   }
 
   Future<void> _loadPublishingGroups(McMapBackend backend) async {
+    final revision = ++_publishingLoadRevision;
     try {
       final groups = await backend.fetchPublishingGroups();
-      if (mounted) setState(() => _publishingGroups = groups);
+      if (!mounted || revision != _publishingLoadRevision) return;
+      if (listEquals(
+        groups.map((group) => (group.id, group.name)).toList(),
+        _publishingGroups.map((group) => (group.id, group.name)).toList(),
+      )) {
+        return;
+      }
+      setState(() {
+        _publishingGroups = groups;
+        if (groups.isEmpty && _destination == _Destination.create) {
+          _destination = _Destination.profile;
+        }
+      });
     } catch (_) {
       // Discovery remains available if publisher verification fails.
     }
@@ -379,7 +563,7 @@ class _HomePageState extends State<HomePage> {
 
   void _onEventPublished(ClubEvent event) {
     _changeClubState(() {
-      if (_loadingEvents) _publishedDuringLoad[event.id] = event;
+      if (_fetchingEvents) _publishedDuringLoad[event.id] = event;
       _events[event.id] = event;
       _destination = _Destination.home;
     });
@@ -392,15 +576,80 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _loadFromServer() async {
-    final backend = widget.backend!;
-    setState(() => _loadingEvents = true);
+  Future<void> _loadFriendRsvps() async {
+    final backend = widget.backend;
+    if (backend == null) return;
+    final load = ++_friendRsvpLoads;
     try {
-      final (events, rsvps) = await (
-        backend.fetchEvents(),
-        backend.fetchMyRsvps(),
-        _social.load(),
-      ).wait.then((r) => (r.$1, r.$2));
+      final rsvps = await backend.fetchFriendRsvps();
+      if (!mounted || load != _friendRsvpLoads) return;
+      _changeClubState(() => _friendRsvps = rsvps);
+    } catch (_) {
+      if (!mounted || load != _friendRsvpLoads) return;
+      _changeClubState(() => _friendRsvps = const {});
+    }
+  }
+
+  /// Only for events you could still go to.
+  FriendRsvps _friendRsvpsFor(ClubEvent event) {
+    if (event.cancelled || event.startsAt?.isAfter(DateTime.now()) == false) {
+      return FriendRsvps.none;
+    }
+    if (widget.backend != null) {
+      return _friendRsvps[event.id] ?? FriendRsvps.none;
+    }
+    final going = [
+      for (final student in _social.connections)
+        if (_sampleFriendRsvps[event.id]?.contains(student.handle) ?? false)
+          RsvpFriend(
+            name: student.name,
+            avatarUrl: student.avatarUrl,
+            profileId: student.handle,
+          ),
+    ];
+    return FriendRsvps(count: going.length, friends: going.take(3).toList());
+  }
+
+  Future<List<ClubEvent>> _loadDemoGoing(McGillian student) async {
+    final events = [
+      for (final MapEntry(key: id, value: going) in _sampleFriendRsvps.entries)
+        if (going.contains(student.handle)) ?_events[id],
+    ];
+    final now = DateTime.now();
+    return events
+        .where(
+          (event) => !event.cancelled && event.startsAt?.isAfter(now) != false,
+        )
+        .toList();
+  }
+
+  Future<void> _openNotification(AppNotification notification) async {
+    _notifications.markRead(notification);
+    _scaffold.currentState?.closeEndDrawer();
+    var event = _events[notification.eventId];
+    if (event == null && widget.backend != null) {
+      // Posted after the feed loaded.
+      try {
+        event = await widget.backend!.fetchEvent(notification.eventId);
+      } catch (_) {
+        return _showError("Couldn't open that event. Try again.");
+      }
+      if (!mounted) return;
+      if (event case final loaded?) {
+        _changeClubState(() => _events[loaded.id] = loaded);
+      }
+    }
+    if (event == null) return _showError('That event is no longer available.');
+    _openEvent(event);
+  }
+
+  Future<void> _loadFromServer({bool keepFeed = false}) async {
+    if (_fetchingEvents) return;
+    final backend = widget.backend!;
+    _fetchingEvents = true;
+    if (!keepFeed) setState(() => _loadingEvents = true);
+    try {
+      final (events, _) = await (backend.fetchEvents(), _social.load()).wait;
       if (!mounted) return;
       _changeClubState(() {
         _events
@@ -408,16 +657,21 @@ class _HomePageState extends State<HomePage> {
           ..addEntries(events.map((e) => MapEntry(e.id, e)))
           ..addAll(_publishedDuringLoad);
         _publishedDuringLoad.clear();
-        _rsvps.restore(rsvps);
         _loadingEvents = false;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _loadingEvents = false;
         _publishedDuringLoad.clear();
       });
-      _showError("Couldn't load events. Pull to refresh or try again later.");
+      _showError(
+        keepFeed
+            ? "Couldn't refresh. Check your connection and try again."
+            : "Couldn't load events. Pull to refresh or try again later.",
+      );
+    } finally {
+      _fetchingEvents = false;
     }
   }
 
@@ -473,6 +727,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _listenForPublications() {
+    _publishingRefresh?.cancel();
     unawaited(_publications?.cancel());
     _publications = widget.publications?.listen((event) {
       final now = DateTime.now();
@@ -489,21 +744,44 @@ class _HomePageState extends State<HomePage> {
             !publishedAt.isAfter(now) &&
             (event.startsAt?.isAfter(now) ?? true)) {
           _clubUpdates.putIfAbsent(event.id, () => event);
+          _notifications.add(
+            AppNotification(
+              id: 'new-${event.id}',
+              type: AppNotificationType.newFollowedEvent,
+              eventId: event.id,
+              groupName: event.club,
+              groupAvatarUrl: event.clubAvatarUrl,
+              title: 'New Event from ${event.club}',
+              body: '${event.club} just posted: ${event.title}',
+              createdAt: now,
+            ),
+          );
         }
         _events[event.id] = event;
-        _rsvps.onPublished(event, _clubProfile, now: now);
+        if (widget.backend == null) {
+          _rsvps.onPublished(
+            event,
+            _clubProfile,
+            now: now,
+            visibility: _rsvpVisibility.value,
+          );
+        }
       });
+      if (widget.backend != null) unawaited(_refreshAttendance());
     });
   }
 
   @override
   void dispose() {
+    _publishingRefresh?.cancel();
     unawaited(_publications?.cancel());
     _homeScroll.dispose();
     _homeSearch.dispose();
     _searchFocus.dispose();
     _clubRevision.dispose();
     _rsvpVisibility.dispose();
+    _lifecycle.dispose();
+    _notifications.dispose();
     _social
       ..removeListener(_onSocialChanged)
       ..dispose();
@@ -511,9 +789,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// [route] names the screen (e.g. `/events/:id`) for future deep links.
-  void _openPage(BuildContext context, Widget page, {String? route}) {
+  Future<void> _openPage(BuildContext context, Widget page, {String? route}) {
     FocusScope.of(context).unfocus();
-    Navigator.of(context).push<void>(
+    return Navigator.of(context).push<void>(
       MaterialPageRoute(
         settings: RouteSettings(name: route),
         builder: (_) => InheritedTheme.captureAll(context, page),
@@ -610,6 +888,8 @@ class _HomePageState extends State<HomePage> {
       onFollow: () => _toggleFollow(id),
       autoRsvp: _clubProfile.clubAutoRsvpOptIns.containsKey(id),
       onAutoRsvp: _autoRsvpAction(id),
+      notifications: _clubProfile.clubNotificationOptIns.containsKey(id),
+      onNotifications: (enabled) => _setNotifications(id, enabled),
     ),
     route: OrganizationPage.routeFor(id),
   );
@@ -628,17 +908,75 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openEvent(ClubEvent event) => _openLivePage(() {
-    final current = _events[event.id] ?? event;
-    return EventDetailsPage(
-      event: current,
-      isGoing: _rsvps.visibilityFor(current.id) != null,
-      canRsvp: current.canRsvpAt(DateTime.now()),
-      recommended: current.isFrosh && _profile.isFroshie,
-      onRsvp: () => _toggleRsvp(current),
-      onOpenClub: current.club.isEmpty ? null : () => _openOrganizer(current),
+  Future<void> _openRsvpFriend(String profileId) async {
+    await _openPage(
+      context,
+      McGillianProfilePage(graph: _social, profileId: profileId),
     );
-  }, route: EventDetailsPage.routeFor(event.id));
+    if (!mounted) return;
+    await _loadFriendRsvps();
+  }
+
+  Future<void> _refresh() => _refreshing ??= _reload().whenComplete(() {
+    _refreshing = null;
+  });
+
+  Future<void> _reload() async {
+    _social.refreshAttendance();
+    final backend = widget.backend;
+    if (backend == null) {
+      if (mounted) _changeClubState(() {});
+      return;
+    }
+    _refreshPublishingGroups();
+    await Future.wait([
+      _loadFromServer(keepFeed: true),
+      _refreshAttendance(),
+      _loadFriendRsvps(),
+      _loadOrganizations(backend),
+      _notifications.refresh(),
+    ]);
+  }
+
+  void _openEvent(ClubEvent event) {
+    unawaited(_loadFriendRsvps());
+    unawaited(
+      _openPage(
+        context,
+        ValueListenableBuilder(
+          valueListenable: _social.attendanceRevision,
+          builder: (_, _, _) {
+            final attendance = widget.backend?.fetchEventAttendees(event.id);
+            return ValueListenableBuilder(
+              valueListenable: _clubRevision,
+              builder: (_, _, _) {
+                final current = _events[event.id] ?? event;
+                return EventDetailsPage(
+                  event: current,
+                  isGoing: _rsvps.visibilityFor(current.id) != null,
+                  canRsvp: current.canRsvpAt(DateTime.now()),
+                  recommended: current.isFrosh && _profile.isFroshie,
+                  onRsvp: () => _toggleRsvp(current),
+                  onOpenClub: current.club.isEmpty
+                      ? null
+                      : () => _openOrganizer(current),
+                  friendRsvps: _friendRsvpsFor(current),
+                  onFriendTap: _openRsvpFriend,
+                  attendees: attendance,
+                );
+              },
+            );
+          },
+        ),
+        route: EventDetailsPage.routeFor(event.id),
+      ).then((_) {
+        if (!mounted) return;
+        _social.refreshAttendance();
+        unawaited(_loadFriendRsvps());
+        unawaited(_refreshAttendance());
+      }),
+    );
+  }
 
   Widget _eventCard(
     ClubEvent event, {
@@ -656,6 +994,8 @@ class _HomePageState extends State<HomePage> {
       upcoming: event.isUpcomingAt(now),
       feedEntry: feedEntry,
       previewLabel: _query.isEmpty ? 'Next event' : 'Matching event',
+      friendRsvps: _friendRsvpsFor(event),
+      onFriendTap: _openRsvpFriend,
       onRsvp: () => _toggleRsvp(event),
       showOrganizer: !insideClub,
       onOpenDetails: () => _openEvent(event),
@@ -671,6 +1011,7 @@ class _HomePageState extends State<HomePage> {
       buildCard: _eventCard,
       followedClubIds: _clubProfile.followedClubIds,
       faculty: _profile.faculty,
+      onRefresh: _refresh,
     ),
     route: AllEventsPage.routeName,
   );
@@ -774,12 +1115,25 @@ class _HomePageState extends State<HomePage> {
           );
     final going = [
       for (final decision in _rsvps.decisions)
-        if (decision.value case final visibility?)
-          (_events[decision.key]!, visibility),
+        if ((_events[decision.key], decision.value) case (
+          final event?,
+          final visibility?,
+        ))
+          (event, visibility),
     ];
 
     final selectedIndex = _destinations.indexOf(_destination);
     return Scaffold(
+      key: _scaffold,
+      endDrawer: NotificationsDrawer(
+        center: _notifications,
+        onOpen: _openNotification,
+      ),
+      // Dragging from the edge would fight with the map.
+      endDrawerEnableOpenDragGesture: false,
+      onEndDrawerChanged: (open) {
+        if (open) unawaited(_notifications.refresh());
+      },
       appBar: AppBar(
         backgroundColor: McMapColors.red,
         foregroundColor: McMapColors.white,
@@ -788,22 +1142,33 @@ class _HomePageState extends State<HomePage> {
           fontSize: 26,
           fontWeight: FontWeight.w700,
         ),
-        title: const McMapWordmark(color: McMapColors.white),
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: McMapWordmark(color: McMapColors.white),
+        ),
         actions: [
+          NotificationBell(
+            center: _notifications,
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              _scaffold.currentState?.openEndDrawer();
+            },
+          ),
           IconButton(
             tooltip: 'Settings',
             onPressed: () => _openPage(
               context,
-              SettingsPage(rsvpVisibility: _rsvpVisibility),
+              SettingsPage(
+                rsvpVisibility: _rsvpVisibility,
+                onSave: _saveRsvpVisibility,
+                demo: widget.backend == null,
+                accountName: widget.account?.fullName,
+                onSignOut: widget.backend?.signOut,
+              ),
             ),
             icon: const Icon(Icons.settings_outlined),
           ),
-          if (widget.backend case final backend?)
-            IconButton(
-              tooltip: 'Sign out',
-              onPressed: backend.signOut,
-              icon: const Icon(Icons.logout_rounded),
-            ),
           const SizedBox(width: 8),
         ],
       ),
@@ -811,130 +1176,154 @@ class _HomePageState extends State<HomePage> {
         child: IndexedStack(
           index: selectedIndex,
           children: [
-            ListView(
-              controller: _homeScroll,
-              primary: false,
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              children: [
-                SearchBar(
-                  controller: _homeSearch,
-                  focusNode: _searchFocus,
-                  trailing: [
-                    if (_showSearchFilters)
-                      TextFieldTapRegion(
-                        child: TextButton(
-                          onPressed: _closeSearch,
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                  ],
-                  hintText: 'Search events, clubs or McGillians',
-                  leading: const Icon(Icons.search_rounded),
-                  padding: const WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                  onChanged: (value) {
-                    setState(() {
-                      _query = value.trim().toLowerCase();
-                      if (_query.isNotEmpty &&
-                          _discovery == _EventDiscovery.discover) {
-                        _discovery = _EventDiscovery.forYou;
-                      }
-                    });
-                  },
-                ),
-                // Counts as part of the search field, so tapping a pill
-                // doesn't unfocus the search and hide the pills mid-tap.
-                TextFieldTapRegion(
-                  child: AnimatedSize(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    alignment: Alignment.topLeft,
-                    child: _showSearchFilters
-                        ? Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Wrap(
-                              spacing: 8,
-                              children: [
-                                for (final scope in _SearchScope.values)
-                                  ChoiceChip(
-                                    label: Text(scope.label),
-                                    selected: scope == _scope,
-                                    onSelected: (_) =>
-                                        setState(() => _scope = scope),
-                                  ),
-                              ],
-                            ),
-                          )
-                        : const SizedBox(width: double.infinity),
-                  ),
-                ),
-                // Students only show up once you search (or pick the
-                // McGillians filter), so the default view stays an event feed.
-                if (_scope == _SearchScope.mcgillians ||
-                    (_scope == _SearchScope.all && _query.isNotEmpty))
-                  ..._mcgillianResults(text),
-                if (_scope == _SearchScope.all && _query.isNotEmpty)
-                  ..._clubSearchResults(text),
-                if (_scope != _SearchScope.mcgillians) ...[
-                  const SizedBox(height: 24),
-                  Text('Club events', style: text.titleLarge),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      for (final mode in _EventDiscovery.values)
-                        ChoiceChip(
-                          label: Text(mode.label),
-                          selected: _discovery == mode,
-                          onSelected: (_) => setState(() => _discovery = mode),
+            PullToRefresh(
+              onRefresh: _refresh,
+              child: ListView(
+                controller: _homeScroll,
+                primary: false,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                children: [
+                  SearchBar(
+                    controller: _homeSearch,
+                    focusNode: _searchFocus,
+                    trailing: [
+                      if (_showSearchFilters)
+                        TextFieldTapRegion(
+                          child: TextButton(
+                            onPressed: _closeSearch,
+                            child: const Text('Cancel'),
+                          ),
                         ),
                     ],
+                    hintText: 'Search events, clubs or McGillians',
+                    leading: const Icon(Icons.search_rounded),
+                    padding: const WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        _query = value.trim().toLowerCase();
+                        if (_query.isNotEmpty &&
+                            _discovery == _EventDiscovery.discover) {
+                          _discovery = _EventDiscovery.forYou;
+                        }
+                      });
+                    },
                   ),
-                  Visibility(
-                    visible: _discovery == _EventDiscovery.discover,
-                    maintainState: true,
-                    child: SuggestedClubs(
-                      faculty: _profile.faculty,
-                      major: _profile.major,
-                      interests: _profile.interests,
-                      followedClubIds: _clubProfile.followedClubIds,
-                      onFollow: _toggleFollow,
-                      onOpen: _openClub,
-                      onBrowse: _browseClubs,
+                  // Counts as part of the search field, so tapping a pill
+                  // doesn't unfocus the search and hide the pills mid-tap.
+                  TextFieldTapRegion(
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topLeft,
+                      child: _showSearchFilters
+                          ? Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Wrap(
+                                spacing: 8,
+                                children: [
+                                  for (final scope in _SearchScope.values)
+                                    ChoiceChip(
+                                      label: Text(scope.label),
+                                      selected: scope == _scope,
+                                      onSelected: (_) =>
+                                          setState(() => _scope = scope),
+                                    ),
+                                ],
+                              ),
+                            )
+                          : const SizedBox(width: double.infinity),
                     ),
                   ),
-                  if (_discovery != _EventDiscovery.discover) ...[
-                    const SizedBox(height: 8),
-                    if (widget.backend == null)
-                      Text('Sample events', style: text.bodySmall),
-                    const SizedBox(height: 12),
-                    if (_loadingEvents)
-                      const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (showForYou)
-                      ..._forYouFeed(text, now)
-                    else ...[
-                      if (_discovery == _EventDiscovery.following &&
-                          _clubProfile.followedClubIds.isEmpty)
-                        const Text('Follow clubs to see their events here.')
-                      else if (matchingEvents.isEmpty)
-                        Text(
-                          _discovery == _EventDiscovery.following
-                              ? 'No events from your followed clubs match right now.'
-                              : 'No club events match your search.',
+                  // Students only show up once you search (or pick the
+                  // McGillians filter), so the default view stays an event feed.
+                  if (_scope == _SearchScope.mcgillians ||
+                      (_scope == _SearchScope.all && _query.isNotEmpty))
+                    ..._mcgillianResults(text),
+                  if (_scope == _SearchScope.all && _query.isNotEmpty)
+                    ..._clubSearchResults(text),
+                  if (_scope != _SearchScope.mcgillians) ...[
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text('Club events', style: text.titleLarge),
                         ),
-                      for (final entry in matchingEvents)
-                        _eventCard(entry.event, feedEntry: entry),
+                        if (widget.backend != null)
+                          IconButton(
+                            tooltip: 'Refresh events and attendance',
+                            onPressed: _loadingEvents ? null : _refresh,
+                            icon: const Icon(Icons.refresh),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final mode in _EventDiscovery.values)
+                          ChoiceChip(
+                            label: Text(mode.label),
+                            selected: _discovery == mode,
+                            onSelected: (_) =>
+                                setState(() => _discovery = mode),
+                          ),
+                      ],
+                    ),
+                    Visibility(
+                      visible: _discovery == _EventDiscovery.discover,
+                      maintainState: true,
+                      child: SuggestedClubs(
+                        faculty: _profile.faculty,
+                        major: _profile.major,
+                        interests: _profile.interests,
+                        followedClubIds: _clubProfile.followedClubIds,
+                        onFollow: _toggleFollow,
+                        onOpen: _openClub,
+                        onBrowse: _browseClubs,
+                      ),
+                    ),
+                    if (_discovery != _EventDiscovery.discover) ...[
+                      const SizedBox(height: 8),
+                      if (widget.backend == null)
+                        Text('Sample events', style: text.bodySmall),
+                      const SizedBox(height: 12),
+                      if (_loadingEvents)
+                        const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (showForYou)
+                        ..._forYouFeed(text, now)
+                      else ...[
+                        if (_discovery == _EventDiscovery.following &&
+                            _clubProfile.followedClubIds.isEmpty)
+                          const Text('Follow clubs to see their events here.')
+                        else if (matchingEvents.isEmpty)
+                          Text(
+                            _discovery == _EventDiscovery.following
+                                ? 'No events from your followed clubs match right now.'
+                                : 'No club events match your search.',
+                          ),
+                        for (final entry in matchingEvents)
+                          _eventCard(entry.event, feedEntry: entry),
+                      ],
                     ],
                   ],
                 ],
-              ],
+              ),
             ),
             if (_hasOpenedMap)
-              const McGillMapPage()
+              McGillMapPage(
+                events: [for (final (event, _) in going) event],
+                onOpenEvent: _openEvent,
+                onOpenOrganization: (id) {
+                  if (clubsById[id] case final club?) _openClub(club);
+                },
+              )
             else
               const SizedBox.shrink(),
             if (_publishingGroups.isNotEmpty)
@@ -943,48 +1332,77 @@ class _HomePageState extends State<HomePage> {
                 groups: _publishingGroups,
                 onPublished: _onEventPublished,
               ),
-            ListView(
-              key: const ValueKey(_Destination.profile),
-              primary: false,
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              children: [
-                Text('Your profile', style: text.headlineMedium),
-                const SizedBox(height: 12),
-                ListenableBuilder(
-                  listenable: _social,
-                  builder: (context, _) => ProfileHeader(
-                    profile: _profile,
-                    onPhotoChanged: _changePhoto,
-                    mcgilliansCount: _social.connections.length,
-                    onMcGilliansTap: () =>
-                        showMcGilliansSheet(context, _social),
-                    eventsCount: going.length,
-                    clubsCount: {
-                      for (final (event, _) in going)
-                        event.clubId ?? event.club,
-                    }.length,
-                    onEdit: () => _openPage(
-                      context,
-                      EditProfilePage(profile: _profile, onSave: _saveProfile),
+            PullToRefresh(
+              onRefresh: _refresh,
+              child: ListView(
+                key: const ValueKey(_Destination.profile),
+                primary: false,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                children: [
+                  Text('Your profile', style: text.headlineMedium),
+                  const SizedBox(height: 12),
+                  ListenableBuilder(
+                    listenable: _social,
+                    builder: (context, _) => ProfileHeader(
+                      profile: _profile,
+                      onPhotoChanged: _changePhoto,
+                      mcgilliansCount: _social.connections.length,
+                      onMcGilliansTap: () =>
+                          showMcGilliansSheet(context, _social),
+                      eventsCount: going.length,
+                      clubsCount: {
+                        for (final (event, _) in going)
+                          event.clubId ?? event.club,
+                      }.length,
+                      onEdit: () => _openPage(
+                        context,
+                        EditProfilePage(
+                          profile: _profile,
+                          onSave: _saveProfile,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton(
-                    onPressed: _openFollowing,
-                    child: Text(
-                      '${_clubProfile.followedClubIds.length} Following',
+                  if (widget.backend is OrganizerBackend &&
+                      widget.profile == null)
+                    ListTile(
+                      leading: const Icon(Icons.school_outlined),
+                      title: const Text('Add academic profile'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _openPage(context, const AcademicInfoPage()),
+                    ),
+                  if (widget.backend is OrganizerBackend)
+                    ListTile(
+                      leading: const Icon(Icons.verified_user_outlined),
+                      title: const Text('Organizer settings'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _openPage(
+                        context,
+                        OrganizerPage(
+                          backend: widget.backend as OrganizerBackend,
+                          fullName: _profile.name,
+                          onPermissionsChanged: _refreshPublishingGroups,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      onPressed: _openFollowing,
+                      child: Text(
+                        '${_clubProfile.followedClubIds.length} Following',
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Text('Your RSVPs', style: text.titleLarge),
-                if (going.isEmpty) const Text('You have no RSVPs yet.'),
-                for (final (event, visibility) in going)
-                  _eventCard(event, visibility: visibility),
-              ],
+                  const SizedBox(height: 16),
+                  Text('Your RSVPs', style: text.titleLarge),
+                  if (going.isEmpty) const Text('You have no RSVPs yet.'),
+                  for (final (event, visibility) in going)
+                    _eventCard(event, visibility: visibility),
+                ],
+              ),
             ),
           ],
         ),
@@ -1111,6 +1529,40 @@ class _HomePageState extends State<HomePage> {
 }
 
 // Sample synopses stand in for the AI summarizer's output.
+/// Demo McGillians going to the sample events, by handle.
+const _sampleFriendRsvps = {
+  'sample-board-game-night': {'maya.t', 'leo.b', 'sofia.r'},
+  'sample-frosh-week-kickoff': {'sofia.r'},
+};
+
+List<AppNotification> _sampleNotifications() {
+  final now = DateTime.now();
+  return [
+    AppNotification(
+      id: 'sample-deadline',
+      type: AppNotificationType.eventDeadlineSoon,
+      eventId: 'sample-board-game-night',
+      groupName: 'Board Games Club',
+      title: 'RSVP ending soon',
+      body:
+          'RSVP deadline for Board Game Night ends soon — 3 of your '
+          'McGillians RSVPed!',
+      friendRsvpCount: 3,
+      createdAt: now.subtract(const Duration(minutes: 20)),
+    ),
+    AppNotification(
+      id: 'sample-new-event',
+      type: AppNotificationType.newFollowedEvent,
+      eventId: 'sample-photo-walk',
+      groupName: 'Photography Club',
+      title: 'New Event from Photography Club',
+      body: 'Photography Club just posted: Photo Walk',
+      createdAt: now.subtract(const Duration(days: 1)),
+      isRead: true,
+    ),
+  ];
+}
+
 const _sampleEvents = [
   ClubEvent(
     'sample-board-game-night',
@@ -1196,6 +1648,8 @@ class _EventCard extends StatelessWidget {
     required this.upcoming,
     required this.previewLabel,
     required this.showOrganizer,
+    this.friendRsvps = FriendRsvps.none,
+    this.onFriendTap,
     this.feedEntry,
     this.visibility,
     this.onOpenDetails,
@@ -1218,6 +1672,10 @@ class _EventCard extends StatelessWidget {
   /// Frosh event shown to a Froshie.
   final bool recommended;
 
+  /// Your McGillians going.
+  final FriendRsvps friendRsvps;
+  final ValueChanged<String>? onFriendTap;
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -1226,6 +1684,7 @@ class _EventCard extends StatelessWidget {
     final groupType = (club ?? clubsById[event.clubId])?.type ?? event.clubType;
     final more = feedEntry?.additionalEvents ?? 0;
     final schedule = formatEventSchedule(context, event);
+    final deadline = formatRsvpDeadline(context, event, DateTime.now());
     final muted = text.bodySmall?.copyWith(color: McMapColors.slate);
 
     return Card(
@@ -1299,6 +1758,7 @@ class _EventCard extends StatelessWidget {
               const SizedBox(height: 4),
               if (schedule.isNotEmpty) Text(schedule, style: muted),
               if (event.location.isNotEmpty) Text(event.location, style: muted),
+              if (deadline != null) Text(deadline, style: muted),
               if (event.cancelled)
                 const Text('Cancelled')
               else if (event.startsAt == null)
@@ -1309,8 +1769,12 @@ class _EventCard extends StatelessWidget {
                 const SizedBox(height: 10),
                 EventSynopsis(event: event),
               ],
+              if (friendRsvps.count > 0) ...[
+                const SizedBox(height: 10),
+                FriendRsvpPill(friendRsvps, onFriendTap: onFriendTap),
+              ],
               if (visibility case final audience?)
-                Text('Going · Demo visibility: ${audience.label}'),
+                Text('Going · ${audience.label}'),
               if (more > 0) Text('$more more from this club', style: muted),
               const SizedBox(height: 10),
               Wrap(

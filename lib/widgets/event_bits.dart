@@ -23,6 +23,22 @@ String formatEventSchedule(BuildContext context, ClubEvent event) {
   return '${dateTime(start)} – $endLabel';
 }
 
+/// "RSVP by Monday, November 24, 2026 · 5:00 PM" for events whose RSVPs close
+/// before they start, "RSVPs closed" after that. Null for other events.
+String? formatRsvpDeadline(
+  BuildContext context,
+  ClubEvent event,
+  DateTime now,
+) {
+  final deadline = event.rsvpDeadline?.toLocal();
+  if (deadline == null || event.cancelled) return null;
+  if (event.startsAt?.isAfter(now) == false) return null;
+  if (!deadline.isAfter(now)) return 'RSVPs closed';
+  final l10n = MaterialLocalizations.of(context);
+  return 'RSVP by ${l10n.formatFullDate(deadline)} · '
+      '${l10n.formatTimeOfDay(TimeOfDay.fromDateTime(deadline))}';
+}
+
 /// Shows the event synopsis or an excerpt from the full description.
 class EventSynopsis extends StatelessWidget {
   const EventSynopsis({super.key, required this.event});

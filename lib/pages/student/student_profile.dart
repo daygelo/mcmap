@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../data/academics.dart';
+import '../../data/interests.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/froshie_tag.dart';
 import '../../widgets/initials_avatar.dart';
@@ -87,7 +88,7 @@ class ProfileAvatar extends StatelessWidget {
       StudentProfile(avatarUrl: final url?) => NetworkImage(url),
       _ => null,
     };
-    // No photo yet → initials on the McGill tint.
+    // No photo yet → initials.
     return InitialsAvatar(
       name: profile.name,
       diameter: radius * 2,
@@ -193,9 +194,10 @@ class ProfileHeader extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
     await Clipboard.setData(
       ClipboardData(
-        text:
-            '${profile.name} on McMap · ${profile.major} · ${profile.year}, '
-            '${profile.faculty}',
+        text: profile.faculty.isEmpty
+            ? '${profile.name} on McMap'
+            : '${profile.name} on McMap · ${profile.major} · ${profile.year}, '
+                  '${profile.faculty}',
       ),
     );
     messenger.showSnackBar(
@@ -242,8 +244,10 @@ class ProfileHeader extends StatelessWidget {
             if (profile.handle == null)
               Text('Sample profile', style: text.bodySmall),
             const SizedBox(height: 4),
-            Text('${profile.major} · ${profile.year}'),
-            Text(profile.faculty, style: text.bodySmall),
+            if (profile.faculty.isNotEmpty) ...[
+              Text('${profile.major} · ${profile.year}'),
+              Text(profile.faculty, style: text.bodySmall),
+            ],
             if (profile.isFroshie) ...[
               const SizedBox(height: 8),
               const FroshieTag(),
@@ -258,7 +262,16 @@ class ProfileHeader extends StatelessWidget {
                 spacing: 8,
                 children: [
                   for (final interest in profile.interests)
-                    Chip(label: Text(interest)),
+                    Chip(
+                      avatar: switch (interestsByName[interest]) {
+                        final known? => Icon(
+                          known.icon,
+                          color: known.accent.deep,
+                        ),
+                        null => null,
+                      },
+                      label: Text(interest),
+                    ),
                 ],
               ),
             ],

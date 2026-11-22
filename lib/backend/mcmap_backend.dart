@@ -3,13 +3,15 @@ import 'package:material_ui/material_ui.dart';
 
 import '../data/academics.dart';
 import '../data/campus_groups.dart';
+import '../models/app_notification.dart';
 import '../models/club_event.dart';
+import '../models/friend_rsvps.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
 import '../pages/student/student_profile.dart';
 import '../social/social_graph.dart';
 
-/// The signed-in student's row in `profiles`.
+/// The signed-in account's row in `profiles`.
 class AccountProfile {
   const AccountProfile({
     required this.id,
@@ -17,19 +19,22 @@ class AccountProfile {
     required this.fullName,
     this.avatarUrl,
     this.bio = '',
+    this.rsvpVisibility = StudentVisibility.private,
     this.academics,
-  });
+    bool? onboardingCompleted,
+  }) : onboardingCompleted = onboardingCompleted ?? academics != null;
 
   final String id;
   final String handle;
   final String fullName;
   final String? avatarUrl;
   final String bio;
+  final StudentVisibility rsvpVisibility;
 
-  /// Null until onboarding (academic profile) is complete.
+  /// Academic details when the account has a student profile.
   final UserProfile? academics;
 
-  bool get onboardingCompleted => academics != null;
+  final bool onboardingCompleted;
 }
 
 /// An organization verified by the server for the current publisher.
@@ -63,6 +68,8 @@ abstract interface class McMapBackend {
 
   Future<void> setOrganizationFollow(String id, bool following);
   Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled);
+  Future<Map<String, DateTime>> fetchOrganizationNotificationOptIns();
+  Future<DateTime?> setOrganizationNotifications(String id, bool enabled);
 
   /// Public organizations keyed by the same stable slugs as events.
   Future<Map<String, CampusGroup>> fetchOrganizations();
@@ -75,6 +82,9 @@ abstract interface class McMapBackend {
   Future<void> removeAvatar();
 
   Future<List<ClubEvent>> fetchEvents();
+
+  /// Null when it was deleted or isn't published.
+  Future<ClubEvent?> fetchEvent(String id);
   Future<List<PublishingGroup>> fetchPublishingGroups();
   Future<ClubEvent> publishEvent({
     required String eventId,
@@ -88,8 +98,30 @@ abstract interface class McMapBackend {
 
   Future<Map<String, StudentVisibility>> fetchMyRsvps();
 
-  /// Null cancels the RSVP.
-  Future<void> setRsvp(String eventId, StudentVisibility? visibility);
+  Future<StudentVisibility> setRsvpVisibility(StudentVisibility visibility);
+
+  /// Returns the visibility that the server assigned, or null on cancellation.
+  Future<StudentVisibility?> setRsvp(String eventId, {required bool going});
+
+  Future<McGillian?> fetchMcGillian(String profileId);
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId);
+  Future<List<RsvpFriend>> fetchEventAttendees(String eventId);
+
+  /// Your McGillians going to upcoming events, by event id. Events with none
+  /// are left out, as are RSVPs their owner keeps private.
+  Future<Map<String, FriendRsvps>> fetchFriendRsvps();
+
+  /// The most recent notifications.
+  Future<List<AppNotification>> fetchNotifications();
+
+  /// Asks the server to write any of your reminders that are due.
+  Future<void> refreshNotifications();
+
+  /// Marks one notification read, or all of them without an [id].
+  Future<void> markNotificationsRead({String? id});
+
+  /// Fires whenever your notifications may have changed.
+  Stream<void> watchNotifications();
 
   Future<List<McGillian>> searchMcGillians(String query);
 

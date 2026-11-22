@@ -137,53 +137,61 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       'restarts.',
                     ),
                     const SizedBox(height: 20),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      initialValue: _faculty,
-                      decoration: const InputDecoration(labelText: 'Faculty'),
-                      items: [
-                        for (final option in {
-                          ...majorsByFaculty.keys,
-                          ..._faculties,
-                          widget.profile.faculty,
-                        })
-                          DropdownMenuItem(value: option, child: Text(option)),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (value) => setState(() => _faculty = value!),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _major,
-                      enabled: !_saving,
-                      decoration: const InputDecoration(
-                        labelText: 'Major/program',
+                    if (widget.profile.faculty.isNotEmpty) ...[
+                      DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        initialValue: _faculty,
+                        decoration: const InputDecoration(labelText: 'Faculty'),
+                        items: [
+                          for (final option in {
+                            ...majorsByFaculty.keys,
+                            ..._faculties,
+                            widget.profile.faculty,
+                          })
+                            DropdownMenuItem(
+                              value: option,
+                              child: Text(option),
+                            ),
+                        ],
+                        onChanged: _saving
+                            ? null
+                            : (value) => setState(() => _faculty = value!),
                       ),
-                      maxLength: 100,
-                      validator: (value) => value!.trim().isEmpty
-                          ? 'Enter your major or program.'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      initialValue: _year,
-                      decoration: const InputDecoration(
-                        labelText: 'Year / degree level',
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _major,
+                        enabled: !_saving,
+                        decoration: const InputDecoration(
+                          labelText: 'Major/program',
+                        ),
+                        maxLength: 100,
+                        validator: (value) => value!.trim().isEmpty
+                            ? 'Enter your major or program.'
+                            : null,
                       ),
-                      items: [
-                        for (final option in {
-                          ...academicStandings,
-                          widget.profile.year,
-                        })
-                          DropdownMenuItem(value: option, child: Text(option)),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (value) => setState(() => _year = value!),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        initialValue: _year,
+                        decoration: const InputDecoration(
+                          labelText: 'Year / degree level',
+                        ),
+                        items: [
+                          for (final option in {
+                            ...academicStandings,
+                            widget.profile.year,
+                          })
+                            DropdownMenuItem(
+                              value: option,
+                              child: Text(option),
+                            ),
+                        ],
+                        onChanged: _saving
+                            ? null
+                            : (value) => setState(() => _year = value!),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     TextFormField(
                       controller: _name,
                       enabled: !_saving,

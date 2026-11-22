@@ -1,19 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/academics.dart';
 import '../data/campus_groups.dart';
 import '../data/clubs.dart';
+import '../models/app_notification.dart';
 import '../models/club_event.dart';
+import '../models/friend_rsvps.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
 import '../pages/student/student_profile.dart';
 import '../social/social_graph.dart';
 import 'mcmap_backend.dart';
+import 'organizer_backend.dart';
 
 /// [McMapBackend] on Supabase. Table and column names match
 /// supabase/migrations/20261121000100_mcmap_schema.sql.
-class SupabaseBackend implements McMapBackend {
+class SupabaseBackend implements McMapBackend, OrganizerBackend {
   SupabaseBackend(this.client);
 
   final SupabaseClient client;
@@ -42,12 +47,12 @@ class SupabaseBackend implements McMapBackend {
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
     final uid = _uid;
-    final state = await client
-        .from('profiles')
-        .select('onboarding_completed')
-        .eq('id', uid)
-        .single();
-    if (state['onboarding_completed'] == true) return;
+    final state = await client.from('profiles').select().eq('id', uid).single();
+    if (state['onboarding_completed'] == true &&
+        (state['account_purpose'] != 'organizer' ||
+            state['degree_level'] != null)) {
+      return;
+    }
 
     Map<String, DateTime?>? sessionFollows;
     if (profile.followedClubIds.isNotEmpty) {
@@ -87,8 +92,7 @@ class SupabaseBackend implements McMapBackend {
     _profileRevision.value++;
   }
 
-  @override
-  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+  Future<Map<String, dynamic>> _loadFollows() async {
     final uid = _uid;
     if (_onboardingSessionFollows.containsKey(uid)) {
       throw const OrganizationFollowsUnavailable();
@@ -105,8 +109,12 @@ class SupabaseBackend implements McMapBackend {
       }
       rethrow;
     }
-    final follows =
-        rows.firstOrNull?['follows'] as Map<String, dynamic>? ?? const {};
+    return rows.firstOrNull?['follows'] as Map<String, dynamic>? ?? const {};
+  }
+
+  @override
+  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+    final follows = await _loadFollows();
     return {
       for (final entry in follows.entries)
         entry.key: switch (entry.value) {
@@ -116,6 +124,30 @@ class SupabaseBackend implements McMapBackend {
           _ => null,
         },
     };
+  }
+
+  @override
+  Future<Map<String, DateTime>> fetchOrganizationNotificationOptIns() async {
+    final follows = await _loadFollows();
+    return {
+      for (final entry in follows.entries)
+        if (entry.value case {
+          'event_notifications_enabled_at': final String value,
+        })
+          entry.key: ?DateTime.tryParse(value),
+    };
+  }
+
+  @override
+  Future<DateTime?> setOrganizationNotifications(
+    String id,
+    bool enabled,
+  ) async {
+    final consent = await client.rpc<String?>(
+      'set_organization_event_notifications',
+      params: {'group_slug': id, 'enabled': enabled},
+    );
+    return consent == null ? null : DateTime.parse(consent);
   }
 
   @visibleForTesting
@@ -175,6 +207,159 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
+  Future<List<CampusGroup>> fetchOrganizerDirectory() async =>
+      (await fetchOrganizations()).values
+          .where((group) => group.uuid != null)
+          .toList();
+
+  @override
+  Future<List<OrganizerApplication>> fetchOrganizerApplications() async {
+    final rows = await client
+        .from('organizer_applications')
+        .select(
+          'id, group_id, full_name, executive_email, role, status, review_note, groups!inner(name)',
+        )
+        .eq('profile_id', _uid)
+        .order('created_at', ascending: false);
+    return [
+      for (final row in rows)
+        OrganizerApplication(
+          id: row['id'] as String,
+          details: (
+            groupId: row['group_id'] as String,
+            fullName: row['full_name'] as String,
+            email: row['executive_email'] as String,
+            role: ExecutiveRole.values.firstWhere(
+              (role) => role.dbValue == row['role'],
+            ),
+          ),
+          organization: row['groups']['name'] as String,
+          status: OrganizerStatus.values.firstWhere(
+            (status) => status.dbValue == row['status'],
+          ),
+          reviewNote: row['review_note'] as String?,
+        ),
+    ];
+  }
+
+  @override
+  Future<String> sendExecutiveCode(ExecutiveDetails details) async {
+    final result = await _organizerVerification({
+      'action': 'send',
+      'group_id': details.groupId,
+      'email': details.email,
+      'role': details.role.dbValue,
+      'full_name': details.fullName,
+    });
+    return result['id'] as String;
+  }
+
+  @override
+  Future<void> verifyExecutiveCode({
+    required String applicationId,
+    required String groupId,
+    required String code,
+  }) async {
+    await _organizerVerification({
+      'action': 'verify',
+      'id': applicationId,
+      'group_id': groupId,
+      'code': code,
+    });
+  }
+
+  Future<Map<String, dynamic>> _organizerVerification(
+    Map<String, String> body,
+  ) async {
+    final token = client.auth.currentSession?.accessToken;
+    if (token == null) {
+      throw const OrganizerRequestError(
+        'Sign in again to verify your executive email.',
+      );
+    }
+    const networkError = OrganizerRequestError(
+      'Could not reach executive verification. Check your connection and try again.',
+    );
+    final Object? data;
+    try {
+      final response = await client.functions
+          .invoke(
+            'organizer-verification',
+            headers: {'Authorization': 'Bearer $token'},
+            body: body,
+          )
+          .timeout(const Duration(seconds: 25));
+      data = response.data;
+    } on FunctionException catch (error) {
+      if (error.status == 0) throw networkError;
+      if (error.status == 404) {
+        throw const OrganizerRequestError(
+          'Executive verification is not set up for this McMap project. Contact McMap support.',
+        );
+      }
+      if (error.status == 401 || error.status == 403) {
+        throw const OrganizerRequestError(
+          'Sign in again with a confirmed account to verify your executive email.',
+        );
+      }
+      final details = error.details;
+      throw _verificationError(details is Map ? details['status'] : null);
+    } on Exception {
+      throw networkError;
+    }
+
+    if (data is Map<String, dynamic>) {
+      final status = data['status'];
+      if (body['action'] == 'send' &&
+          status == 'code_sent' &&
+          data['id'] is String &&
+          (data['id'] as String).isNotEmpty) {
+        return data;
+      }
+      if (body['action'] == 'verify' &&
+          (status == 'approved' || status == 'pending_review')) {
+        return data;
+      }
+      throw _verificationError(status);
+    }
+    throw _verificationError(null);
+  }
+
+  OrganizerRequestError _verificationError(
+    Object? status,
+  ) => OrganizerRequestError(switch (status) {
+    'sign_in_required' =>
+      'Sign in again with a confirmed account to verify your executive email.',
+    'invalid_email' => 'Enter a valid executive email address.',
+    'invalid_details' => 'Check the executive email and application details.',
+    'already_submitted' => 'An active application exists for this organization. Refresh to see its status.',
+    'rate_limited' => 'Sending is limited to once per minute and five times per day. Try again later.',
+    'email_rate_limited' => 'Email delivery is temporarily limited. Wait a minute before requesting another code.',
+    'email_unavailable' || 'delivery_failed' => 'McMap could not confirm that the code was emailed. Wait a minute and try again.',
+    'invalid_code' => 'That code is incorrect. Check the email and try again.',
+    'expired' => 'That code has expired. Request a new code.',
+    'attempts_exhausted' => 'Too many incorrect attempts. Request a new code.',
+    _ => 'Verification is temporarily unavailable. Try again later.',
+  });
+
+  @override
+  Future<void> requestOrganization(String name, OrganizerCategory category) =>
+      client.rpc<void>(
+        'organizer_request_directory_review',
+        params: {'requested_name': name, 'requested_type': category.name},
+      );
+
+  @override
+  Future<void> completeOrganizerOnboarding() async {
+    await client
+        .from('profiles')
+        .update({'account_purpose': 'organizer', 'onboarding_completed': true})
+        .eq('id', _uid)
+        .eq('onboarding_completed', false);
+    _profileRevision.value++;
+  }
+
+  @override
   Future<void> updateProfile(StudentProfile profile) async {
     final (degree, year) = standingToDb(profile.year);
     await client
@@ -182,9 +367,11 @@ class SupabaseBackend implements McMapBackend {
         .update({
           'full_name': profile.name,
           'bio': profile.bio,
-          ..._academicColumns(degree, year, profile.firstYearAtMcGill),
-          'faculty': profile.faculty,
-          'major': profile.major.isEmpty ? null : profile.major,
+          if (profile.faculty.isNotEmpty) ...{
+            ..._academicColumns(degree, year, profile.firstYearAtMcGill),
+            'faculty': profile.faculty,
+            'major': profile.major.isEmpty ? null : profile.major,
+          },
           'interests': profile.interests.toList(),
         })
         .eq('id', _uid);
@@ -247,6 +434,16 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
+  Future<ClubEvent?> fetchEvent(String id) async {
+    final row = await client
+        .from('events')
+        .select(_eventColumns)
+        .eq('id', id)
+        .maybeSingle();
+    return row == null ? null : _event(row);
+  }
+
+  @override
   Future<List<PublishingGroup>> fetchPublishingGroups() async {
     final rows = await client
         .from('group_publishers')
@@ -288,6 +485,14 @@ class SupabaseBackend implements McMapBackend {
 
   @override
   Future<Map<String, StudentVisibility>> fetchMyRsvps() async {
+    try {
+      await client.rpc<void>('refresh_my_auto_rsvps');
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202' ||
+          !error.message.contains('public.refresh_my_auto_rsvps')) {
+        rethrow;
+      }
+    }
     final rows = await client
         .from('event_rsvps')
         .select('event_id, visibility')
@@ -299,21 +504,207 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
-  Future<void> setRsvp(String eventId, StudentVisibility? visibility) async {
-    if (visibility == null) {
+  Future<StudentVisibility> setRsvpVisibility(
+    StudentVisibility visibility,
+  ) async => visibilityFromDb(
+    await client.rpc<String>(
+      'set_my_rsvp_visibility',
+      params: {'preference': visibilityToDb(visibility)},
+    ),
+  );
+
+  @override
+  Future<StudentVisibility?> setRsvp(
+    String eventId, {
+    required bool going,
+  }) async {
+    final uid = _uid;
+    if (!going) {
       await client
           .from('event_rsvps')
           .delete()
           .eq('event_id', eventId)
-          .eq('profile_id', _uid);
-    } else {
-      await client.from('event_rsvps').upsert({
-        'event_id': eventId,
-        'profile_id': _uid,
-        'visibility': visibilityToDb(visibility),
-      });
+          .eq('profile_id', uid);
+      return null;
     }
+    final inserted = await client
+        .from('event_rsvps')
+        .upsert({
+          'event_id': eventId,
+          'profile_id': uid,
+        }, ignoreDuplicates: true)
+        .select('visibility')
+        .maybeSingle();
+    final row =
+        inserted ??
+        await client
+            .from('event_rsvps')
+            .select('visibility')
+            .eq('event_id', eventId)
+            .eq('profile_id', uid)
+            .single();
+    return visibilityFromDb(row['visibility']);
   }
+
+  @override
+  Future<McGillian?> fetchMcGillian(String profileId) async {
+    final row = await client
+        .from('profiles')
+        .select()
+        .eq('id', profileId)
+        .eq('onboarding_completed', true)
+        .maybeSingle();
+    return row == null ? null : _mcgillian(row);
+  }
+
+  @override
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId) async {
+    final rows = await client
+        .from('event_rsvps')
+        .select('events!inner($_eventColumns)')
+        .eq('profile_id', profileId)
+        .eq('events.cancelled', false)
+        .gte('events.starts_at', DateTime.now().toUtc().toIso8601String());
+    return [
+      for (final row in rows) _event(row['events'] as Map<String, dynamic>),
+    ]..sort((a, b) => a.startsAt!.compareTo(b.startsAt!));
+  }
+
+  @override
+  Future<List<RsvpFriend>> fetchEventAttendees(String eventId) async {
+    final rows = await client
+        .from('event_rsvps')
+        .select('profile_id, profiles!inner(full_name, avatar_url)')
+        .eq('event_id', eventId)
+        .neq('profile_id', _uid)
+        .eq('profiles.onboarding_completed', true)
+        .order('created_at')
+        .limit(30);
+    return [
+      for (final row in rows)
+        RsvpFriend(
+          profileId: row['profile_id'] as String,
+          name: (row['profiles']['full_name'] as String? ?? '').trim(),
+          avatarUrl: row['profiles']['avatar_url'] as String?,
+        ),
+    ];
+  }
+
+  @override
+  Future<Map<String, FriendRsvps>> fetchFriendRsvps() async {
+    final List<dynamic> rows;
+    try {
+      rows = await client.rpc<List<dynamic>>('friend_rsvps');
+    } on PostgrestException catch (error) {
+      if (_isMissingNotifications(error)) return const {};
+      rethrow;
+    }
+    return {
+      for (final row in rows.cast<Map<String, dynamic>>())
+        row['event_id'] as String: FriendRsvps(
+          count: (row['friend_rsvp_count'] as num).toInt(),
+          friends: [
+            for (final friend in row['friend_rsvps'] as List? ?? const [])
+              RsvpFriend(
+                profileId: friend['profile_id'] as String?,
+                name: (friend['full_name'] as String? ?? '').trim(),
+                avatarUrl: friend['avatar_url'] as String?,
+              ),
+          ],
+        ),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+
+  static const _maxNotifications = 50;
+
+  @override
+  Future<List<AppNotification>> fetchNotifications() async {
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await client
+          .from('notification_inbox')
+          .select()
+          .eq('user_id', _uid)
+          .order('created_at', ascending: false)
+          .limit(_maxNotifications);
+    } on PostgrestException catch (error) {
+      if (_isMissingNotifications(error)) return const [];
+      rethrow;
+    }
+    return [
+      for (final row in rows)
+        if (AppNotificationType.fromDb(row['type']) case final type?)
+          AppNotification(
+            id: row['id'] as String,
+            type: type,
+            eventId: row['event_id'] as String,
+            groupName: row['group_name'] as String? ?? '',
+            groupAvatarUrl: row['group_avatar_url'] as String?,
+            title: row['title'] as String,
+            body: row['body'] as String,
+            friendRsvpCount: (row['friend_rsvp_count'] as num).toInt(),
+            isRead: row['is_read'] == true,
+            createdAt: DateTime.parse(row['created_at'] as String),
+          ),
+    ];
+  }
+
+  @override
+  Future<void> refreshNotifications() =>
+      client.rpc<void>('refresh_my_notifications');
+
+  @override
+  Future<void> markNotificationsRead({String? id}) async {
+    final mine = client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('user_id', _uid);
+    await (id == null ? mine.eq('is_read', false) : mine.eq('id', id));
+  }
+
+  @override
+  Stream<void> watchNotifications() {
+    final uid = _uid;
+    RealtimeChannel? channel;
+    late final StreamController<void> changes;
+    changes = StreamController<void>(
+      onListen: () => channel = client
+          .channel('notifications:$uid')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'notifications',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'user_id',
+              value: uid,
+            ),
+            callback: (_) => changes.add(null),
+          )
+          // Also after reconnecting, for anything missed in between.
+          .subscribe((status, _) {
+            if (status == RealtimeSubscribeStatus.subscribed) changes.add(null);
+          }),
+      onCancel: () async {
+        if (channel case final open?) await client.removeChannel(open);
+      },
+    );
+    return changes.stream;
+  }
+
+  /// The notifications migration hasn't been run on this database.
+  bool _isMissingNotifications(PostgrestException error) =>
+      switch (error.code) {
+        'PGRST202' => error.message.contains('public.friend_rsvps'),
+        'PGRST205' =>
+          error.message.contains("'public.notifications'") ||
+              error.message.contains("'public.notification_inbox'"),
+        _ => false,
+      };
 
   // -------------------------------------------------------------------------
   // McGillians
@@ -381,6 +772,8 @@ class SupabaseBackend implements McMapBackend {
       fullName: row['full_name'] as String? ?? '',
       avatarUrl: row['avatar_url'] as String?,
       bio: row['bio'] as String? ?? '',
+      onboardingCompleted: done,
+      rsvpVisibility: visibilityFromDb(row['rsvp_visibility']),
       academics: !done || degree == null || faculty == null
           ? null
           : UserProfile(
@@ -421,6 +814,7 @@ class SupabaseBackend implements McMapBackend {
       createdAt: time('created_at'),
       startsAt: time('starts_at'),
       endsAt: time('ends_at'),
+      rsvpDeadline: time('rsvp_deadline'),
       description: row['full_description'] as String?,
       synopsis: row['ai_synopsis'] as String?,
       latitude: number('latitude'),

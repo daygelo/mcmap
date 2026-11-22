@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../data/club_event_feed.dart';
 import '../models/club_event.dart';
+import '../widgets/pull_to_refresh.dart';
 
 enum _Filter {
   all('All'),
@@ -21,6 +22,7 @@ class AllEventsPage extends StatefulWidget {
     required this.buildCard,
     required this.followedClubIds,
     required this.faculty,
+    required this.onRefresh,
   });
 
   static const routeName = '/events';
@@ -29,6 +31,7 @@ class AllEventsPage extends StatefulWidget {
   final Widget Function(ClubEvent event) buildCard;
   final Set<String> followedClubIds;
   final String faculty;
+  final Future<void> Function() onRefresh;
 
   @override
   State<AllEventsPage> createState() => _AllEventsPageState();
@@ -54,35 +57,40 @@ class _AllEventsPageState extends State<AllEventsPage> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              itemCount: shown.isEmpty ? 2 : shown.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final filter in _Filter.values)
-                          ChoiceChip(
-                            label: Text(filter.label),
-                            tooltip: filter == _Filter.faculty
-                                ? widget.faculty
-                                : null,
-                            selected: _filter == filter,
-                            onSelected: (_) => setState(() => _filter = filter),
-                          ),
-                      ],
-                    ),
-                  );
-                }
-                if (shown.isEmpty) {
-                  return const Text('No events match this filter yet.');
-                }
-                return widget.buildCard(shown[index - 1]);
-              },
+            child: PullToRefresh(
+              onRefresh: widget.onRefresh,
+              child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                itemCount: shown.isEmpty ? 2 : shown.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final filter in _Filter.values)
+                            ChoiceChip(
+                              label: Text(filter.label),
+                              tooltip: filter == _Filter.faculty
+                                  ? widget.faculty
+                                  : null,
+                              selected: _filter == filter,
+                              onSelected: (_) =>
+                                  setState(() => _filter = filter),
+                            ),
+                        ],
+                      ),
+                    );
+                  }
+                  if (shown.isEmpty) {
+                    return const Text('No events match this filter yet.');
+                  }
+                  return widget.buildCard(shown[index - 1]);
+                },
+              ),
             ),
           ),
         ),

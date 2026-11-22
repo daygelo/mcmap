@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../models/club_event.dart';
 import '../theme/app_theme.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/profile_stats.dart';
@@ -102,10 +103,11 @@ class McGillianAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = McMapAccent.of(student.name);
     return CircleAvatar(
       radius: radius,
-      backgroundColor: McMapColors.redTint,
-      foregroundColor: McMapColors.redStrong,
+      backgroundColor: accent.tint,
+      foregroundColor: accent.deep,
       foregroundImage: switch (student.avatarUrl) {
         final url? => NetworkImage(url),
         null => null,
@@ -184,95 +186,250 @@ class McGillianTile extends StatelessWidget {
 
 /// Another student's profile, same Instagram layout as your own: avatar and
 /// stats side by side, details underneath, then the friend button.
-class McGillianProfilePage extends StatelessWidget {
+class McGillianProfilePage extends StatefulWidget {
   const McGillianProfilePage({
     super.key,
     required this.graph,
-    required this.student,
-  });
+    this.student,
+    this.profileId,
+  }) : assert(student != null || profileId != null);
 
   final SocialGraph graph;
-  final McGillian student;
+  final McGillian? student;
+  final String? profileId;
+
+  @override
+  State<McGillianProfilePage> createState() => _McGillianProfilePageState();
+}
+
+class _McGillianProfilePageState extends State<McGillianProfilePage> {
+  late Future<McGillian?> _profile;
+  Future<List<ClubEvent>>? _events;
+  SocialGraph get graph => widget.graph;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.student case final student?) {
+      _profile = Future.value(student);
+      _events = _loadEvents();
+    } else {
+      _profile = _loadProfile();
+    }
+    if (widget.student case final student?) graph.loadStats(student);
+    graph.attendanceRevision.addListener(_refresh);
+  }
+
+  Future<McGillian?> _loadProfile() async {
+    final student = await graph.findProfile(widget.profileId!);
+    if (mounted && student != null) {
+      _events = _loadEvents();
+      graph.loadStats(student);
+    }
+    return student;
+  }
+
+  Future<List<ClubEvent>>? _loadEvents() {
+    final id = widget.profileId ?? widget.student?.id;
+    final demoStudent =
+        widget.student ??
+        graph.directory
+            .where((student) => student.handle == widget.profileId)
+            .firstOrNull;
+    final load = graph.backend == null && demoStudent?.isPrivate == false
+        ? graph.loadGoing?.call(demoStudent!)
+        : id == null
+        ? null
+        : graph.backend?.fetchProfileRsvps(id);
+    // A fast failure can arrive before the profile body mounts its builder.
+    load?.ignore();
+    return load;
+  }
+
+  void _refresh() {
+    if (_events == null) return;
+    setState(() {
+      _events = _loadEvents();
+    });
+  }
+
+  @override
+  void dispose() {
+    graph.attendanceRevision.removeListener(_refresh);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Student profile')),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ListenableBuilder(
-                          listenable: graph,
-                          builder: (context, _) => ProfileTopRow(
-                            avatar: RingedAvatar(
-                              child: McGillianAvatar(
-                                student: student,
-                                radius: 37,
+      appBar: AppBar(
+        title: const Text('Student profile'),
+        actions: [
+          if (graph.backend != null)
+            IconButton(
+              tooltip: 'Refresh visible events',
+              onPressed: _refresh,
+              icon: const Icon(Icons.refresh),
+            ),
+        ],
+      ),
+      body: FutureBuilder<McGillian?>(
+        future: _profile,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final student = snapshot.data;
+          if (student == null) {
+            return Center(
+              child: snapshot.hasError
+                  ? TextButton(
+                      onPressed: () =>
+                          setState(() => _profile = _loadProfile()),
+                      child: const Text(
+                        'Could not load this profile. Try again.',
+                      ),
+                    )
+                  : const Text('This profile is unavailable.'),
+            );
+          }
+          return SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ListenableBuilder(
+                              listenable: graph,
+                              builder: (context, _) => ProfileTopRow(
+                                avatar: RingedAvatar(
+                                  child: McGillianAvatar(
+                                    student: student,
+                                    radius: 37,
+                                  ),
+                                ),
+                                stats: [
+                                  ProfileStat(
+                                    value: graph.countFor(
+                                      graph.current(student),
+                                    ),
+                                    label: 'McGillians',
+                                  ),
+                                ],
                               ),
                             ),
-                            stats: [
-                              ProfileStat(
-                                value: graph.countFor(student),
-                                label: 'McGillians',
-                              ),
-                              ProfileStat(
-                                value: student.eventsCount,
-                                label: 'Events',
-                              ),
-                              ProfileStat(
-                                value: student.clubsCount,
-                                label: 'Clubs',
+                            const SizedBox(height: 12),
+                            Text(student.name, style: text.titleLarge),
+                            const SizedBox(height: 4),
+                            Text('${student.major} · ${student.year}'),
+                            Text(student.faculty, style: text.bodySmall),
+                            if (student.isFroshie) ...[
+                              const SizedBox(height: 8),
+                              const FroshieTag(),
+                            ],
+                            if (student.bio.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Text(student.bio),
+                            ],
+                            const SizedBox(height: 14),
+                            FriendButton(
+                              graph: graph,
+                              student: student,
+                              expanded: true,
+                            ),
+                            if (student.isPrivate) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Private profile: they need to accept your '
+                                'request.',
+                                style: text.bodySmall,
                               ),
                             ],
-                          ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        Text(student.name, style: text.titleLarge),
-                        const SizedBox(height: 4),
-                        Text('${student.major} · ${student.year}'),
-                        Text(student.faculty, style: text.bodySmall),
-                        if (student.isFroshie) ...[
-                          const SizedBox(height: 8),
-                          const FroshieTag(),
-                        ],
-                        if (student.bio.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(student.bio),
-                        ],
-                        const SizedBox(height: 14),
-                        FriendButton(
-                          graph: graph,
-                          student: student,
-                          expanded: true,
-                        ),
-                        if (student.isPrivate) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Private profile: they need to accept your '
-                            'request.',
-                            style: text.bodySmall,
-                          ),
-                        ],
-                      ],
+                      ),
                     ),
+                    if (_events case final events?)
+                      _ProfileAttendance(
+                        events: events,
+                        onOpen: graph.onOpenEvent,
+                        onRetry: _refresh,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ProfileAttendance extends StatelessWidget {
+  const _ProfileAttendance({
+    required this.events,
+    required this.onOpen,
+    required this.onRetry,
+  });
+
+  final Future<List<ClubEvent>> events;
+  final ValueChanged<ClubEvent>? onOpen;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = MaterialLocalizations.of(context);
+    return FutureBuilder<List<ClubEvent>>(
+      future: events,
+      builder: (context, snapshot) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 20),
+            Text(
+              "Events they're going to",
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            if (snapshot.connectionState != ConnectionState.done)
+              const LinearProgressIndicator()
+            else if (snapshot.hasError)
+              TextButton(
+                onPressed: onRetry,
+                child: const Text('Could not load events. Try again.'),
+              )
+            else if (snapshot.data!.isEmpty)
+              const Text('No upcoming RSVP events are visible to you.')
+            else
+              for (final event in snapshot.data!)
+                Card(
+                  child: ListTile(
+                    title: Text(event.title),
+                    subtitle: Text(
+                      [
+                        if (event.club.isNotEmpty) event.club,
+                        if (event.startsAt case final start?)
+                          '${localizations.formatMediumDate(start.toLocal())} · '
+                              '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(start.toLocal()))}',
+                        if (event.location.isNotEmpty) event.location,
+                        'Going',
+                      ].join('\n'),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: onOpen == null ? null : () => onOpen!(event),
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-      ),
+          ],
+        );
+      },
     );
   }
 }

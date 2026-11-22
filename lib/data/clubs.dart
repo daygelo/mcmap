@@ -105,6 +105,23 @@ final clubCatalog = List<ClubOrganization>.unmodifiable(
       .map((row) => ClubOrganization._(row.split('|'))),
 );
 
+/// Macdonald Campus societies. They stay searchable for students who follow
+/// them, but signup and suggestions only offer downtown organizations.
+const macdonaldOrganizationIds = {
+  'engineering-bioresource-engineering-students-society-bess',
+  'macdonald-aesus',
+  'macdonald-dhnus',
+  'macdonald-fmt',
+  'macdonald-fsa',
+  'mcgill-mcgss',
+  'mcgill-mcss',
+};
+
+/// What signup and suggestions offer.
+final downtownClubCatalog = List<ClubOrganization>.unmodifiable(
+  clubCatalog.where((club) => !macdonaldOrganizationIds.contains(club.id)),
+);
+
 final clubsById = Map<String, ClubOrganization>.unmodifiable({
   for (final club in clubCatalog) club.id: club,
 });

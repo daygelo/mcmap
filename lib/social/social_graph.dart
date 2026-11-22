@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
+import '../models/club_event.dart';
 
 /// Your relationship to another student.
 enum FriendStatus {
@@ -107,6 +108,26 @@ class SocialGraph extends ChangeNotifier {
   /// Called when a server request fails (e.g. to show a snackbar).
   void Function(Object error)? onError;
 
+  /// Called when the server has saved a change to your connections.
+  VoidCallback? onConnectionsSaved;
+  final attendanceRevision = ValueNotifier(0);
+
+  void refreshAttendance() => attendanceRevision.value++;
+
+  Future<McGillian?> findProfile(String id) async {
+    final backend = this.backend;
+    if (backend == null) {
+      return _directory.where((student) => student.handle == id).firstOrNull;
+    }
+    return backend.fetchMcGillian(id);
+  }
+
+  /// Loads the upcoming events a student is going to and lets you see.
+  Future<List<ClubEvent>> Function(McGillian student)? loadGoing;
+
+  /// Opens one of those events.
+  ValueChanged<ClubEvent>? onOpenEvent;
+
   String? _lastRemoteQuery;
   Timer? _searchDebounce;
   bool _disposed = false;
@@ -145,7 +166,7 @@ class SocialGraph extends ChangeNotifier {
         .then(
           (status) {
             _status[student.handle] = status;
-            _notify();
+            _connectionsSaved();
           },
           onError: (Object error) {
             _restore(student, previous);
@@ -161,10 +182,15 @@ class SocialGraph extends ChangeNotifier {
     notifyListeners();
     final id = student.id;
     if (backend == null || id == null) return;
-    backend!.removeMcGillian(id).catchError((Object error) {
-      _restore(student, previous);
-      onError?.call(error);
-    });
+    backend!
+        .removeMcGillian(id)
+        .then(
+          (_) => _connectionsSaved(),
+          onError: (Object error) {
+            _restore(student, previous);
+            onError?.call(error);
+          },
+        );
   }
 
   /// People you're connected to: your McGillians.
@@ -178,6 +204,25 @@ class SocialGraph extends ChangeNotifier {
   int countFor(McGillian student) =>
       student.mcgilliansCount +
       (backend == null && statusOf(student) == FriendStatus.following ? 1 : 0);
+
+  /// The latest copy of [student].
+  McGillian current(McGillian student) => _directory.firstWhere(
+    (other) => other.handle == student.handle,
+    orElse: () => student,
+  );
+
+  /// Your connections load without their stats; search results have them.
+  Future<void> loadStats(McGillian student) async {
+    final backend = this.backend;
+    if (backend == null) return;
+    try {
+      final results = await backend.searchMcGillians(student.handle);
+      results.where((found) => found.handle == student.handle).forEach(_merge);
+      _notify();
+    } catch (_) {
+      // The rest of the profile is still useful.
+    }
+  }
 
   /// Matches from what's loaded so far. With a backend this also kicks off
   /// a server search; results arrive via [notifyListeners].
@@ -225,6 +270,12 @@ class SocialGraph extends ChangeNotifier {
     _notify();
   }
 
+  void _connectionsSaved() {
+    if (_disposed) return;
+    notifyListeners();
+    onConnectionsSaved?.call();
+  }
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }
@@ -233,6 +284,7 @@ class SocialGraph extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _searchDebounce?.cancel();
+    attendanceRevision.dispose();
     super.dispose();
   }
 }

@@ -7,9 +7,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'backend/mcmap_backend.dart';
 import 'backend/supabase_backend.dart';
+import 'backend/organizer_backend.dart';
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
 import 'pages/onboarding/academic_info_page.dart';
+import 'pages/onboarding/account_purpose_page.dart';
+import 'pages/onboarding/organizer_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/welcome_back_page.dart';
 import 'theme/app_theme.dart';
@@ -156,11 +159,28 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
         final academics = account.academics;
-        if (academics == null) {
-          return AcademicInfoPage(onSignOut: widget.backend.signOut);
+        if (!account.onboardingCompleted) {
+          final backend = widget.backend;
+          void open(Widget page) =>
+              Navigator.of(context)
+                  .push<void>(MaterialPageRoute(builder: (_) => page));
+          if (backend is OrganizerBackend) {
+            return AccountPurposePage(
+              onStudent: () => open(const AcademicInfoPage()),
+              onOrganizer: () => open(
+                OrganizerPage(
+                  backend: backend as OrganizerBackend,
+                  fullName: account.fullName,
+                  onboarding: true,
+                ),
+              ),
+              onSignOut: backend.signOut,
+            );
+          }
+          return AcademicInfoPage(onSignOut: backend.signOut);
         }
         return HomePage(
-          key: ValueKey(account.id),
+          key: ValueKey((account.id, academics != null)),
           profile: academics,
           account: account,
           backend: widget.backend,

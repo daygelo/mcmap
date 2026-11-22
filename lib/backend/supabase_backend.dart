@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/academics.dart';
+import '../data/campus_groups.dart';
+import '../data/clubs.dart';
 import '../models/club_event.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
@@ -121,19 +123,21 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
-  Future<Map<String, String>> fetchOrganizationNames() async {
+  Future<Map<String, CampusGroup>> fetchOrganizations() async {
     const pageSize = 500;
-    final names = <String, String>{};
+    final groups = <String, CampusGroup>{};
     for (var offset = 0; ; offset += pageSize) {
+      // All columns: naming short_name/handle would fail on a database that
+      // hasn't run the group details migration yet.
       final rows = await client
           .from('groups')
-          .select('slug, name')
+          .select()
           .order('slug')
           .range(offset, offset + pageSize - 1);
       for (final row in rows) {
-        names[row['slug'] as String] = row['name'] as String;
+        groups[row['slug'] as String] = CampusGroup.fromRow(row);
       }
-      if (rows.length < pageSize) return names;
+      if (rows.length < pageSize) return groups;
     }
   }
 
@@ -191,7 +195,7 @@ class SupabaseBackend implements McMapBackend {
   // Events & RSVPs
   // -------------------------------------------------------------------------
 
-  static const _eventColumns = '*, groups(slug, name, avatar_url)';
+  static const _eventColumns = '*, groups(slug, name, avatar_url, type)';
 
   @override
   Future<List<ClubEvent>> fetchEvents() async {
@@ -367,6 +371,7 @@ class SupabaseBackend implements McMapBackend {
       row['location_name'] as String? ?? '',
       clubId: group?['slug'] as String?,
       clubAvatarUrl: group?['avatar_url'] as String?,
+      clubType: OrganizationType.fromDb(group?['type']),
       isFrosh: row['is_froshie_event'] == true,
       publishedAt: time('published_at'),
       createdAt: time('created_at'),

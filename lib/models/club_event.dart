@@ -1,3 +1,5 @@
+import '../data/clubs.dart';
+
 /// An event shown in the student feed. Sample events have no publication data.
 class ClubEvent {
   const ClubEvent(
@@ -15,6 +17,7 @@ class ClubEvent {
     this.description,
     this.synopsis,
     this.clubAvatarUrl,
+    this.clubType,
     this.latitude,
     this.longitude,
     this.tags = const [],
@@ -44,6 +47,9 @@ class ClubEvent {
   /// The hosting group's picture (`groups.avatar_url`).
   final String? clubAvatarUrl;
 
+  /// The hosting group's type (`groups.type`), for groups outside the catalog.
+  final OrganizationType? clubType;
+
   /// Venue coordinates for the RSVP map.
   final double? latitude;
   final double? longitude;
@@ -69,5 +75,7 @@ class ClubEvent {
   ].any((value) => value.toLowerCase().contains(query));
 
   bool matches(String query) =>
-      matchesDetails(query) || club.toLowerCase().contains(query);
+      matchesDetails(query) ||
+      club.toLowerCase().contains(query) ||
+      tags.any((tag) => tag.toLowerCase() == query);
 }

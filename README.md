@@ -23,10 +23,23 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      storage buckets. It also creates a profile row for any existing accounts.
    - `supabase/migrations/20261121000200_allow_encoded_group_slugs.sql`:
      lets group slugs contain `%` (one catalog ID keeps URL-encoded accents).
+   - `supabase/migrations/20261122100000_more_group_types.sql`: adds the
+     `campus_society`, `faculty_association` and `research_group` types. Run
+     it on its own, after the migrations described further down.
+   - `supabase/migrations/20261122100100_group_details.sql`: adds
+     `short_name`, `handle` and `faculty_affiliation` to `groups` and sets the
+     right types for student governance.
+   - `supabase/migrations/20261122100200_merge_duplicate_groups.sql`: merges
+     the first seed's SSMU, PGSS, EUS and MUS into their catalog groups, moving
+     events, RSVPs, publishers and follows. Running an older `seed.sql`
+     afterwards would add the duplicates back.
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
-   match the app's club IDs. Event dates are relative to when you run it.
+   match the app's club IDs. Event dates are relative to when you run it. It
+   needs every migration, and is safe to run again. Groups outside the catalog
+   live in `lib/data/campus_groups.dart`; `metadata.verified` is false for the
+   ones without a confirming public page.
 4. Enable email/password authentication in **Authentication → Providers**.
 5. In **Authentication → URL Configuration**, configure the Site URL and redirect URLs if email confirmation is enabled.
 6. Optionally disable email confirmation for immediate account login during development.

@@ -16,6 +16,7 @@ List<ClubFeedEntry> buildClubEventFeed(
   required String query,
   Set<String>? followedOnly,
   bool groupAllOrganizations = false,
+  bool Function(String organizationId)? matchesOrganization,
 }) {
   final groups = <String, List<ClubEvent>>{};
   final entries = <ClubFeedEntry>[];
@@ -29,7 +30,12 @@ List<ClubFeedEntry> buildClubEventFeed(
     order[event.id] = order.length;
     final groupId = groupAllOrganizations ? event.clubId : club?.id;
     if (groupId == null || groupId.isEmpty) {
-      if (event.matches(query)) entries.add(ClubFeedEntry(event));
+      if (event.matches(query) ||
+          (query.isNotEmpty &&
+              event.clubId != null &&
+              (matchesOrganization?.call(event.clubId!) ?? false))) {
+        entries.add(ClubFeedEntry(event));
+      }
     } else {
       (groups[groupId] ??= []).add(event);
     }

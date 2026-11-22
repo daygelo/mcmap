@@ -1,6 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../data/campus_groups.dart';
 import '../theme/app_theme.dart';
+import '../widgets/group_type_badge.dart';
 import '../widgets/initials_avatar.dart';
 import '../widgets/auto_rsvp_switch.dart';
 import 'student/club_discovery.dart';
@@ -17,6 +19,7 @@ class OrganizationPage extends StatelessWidget {
     super.key,
     required this.id,
     required this.name,
+    this.group,
     this.following = false,
     this.autoRsvp = false,
     this.onFollow,
@@ -26,6 +29,9 @@ class OrganizationPage extends StatelessWidget {
   /// URL-safe id, e.g. `ssmu-frosh-committee`.
   final String id;
   final String name;
+
+  /// Type, handle and description, when known.
+  final CampusGroup? group;
   final bool following;
   final bool autoRsvp;
   final VoidCallback? onFollow;
@@ -53,11 +59,45 @@ class OrganizationPage extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    InitialsAvatar(name: name, diameter: 72),
+                    InitialsAvatar(
+                      name: name,
+                      diameter: 72,
+                      image: switch (group?.avatarUrl) {
+                        final url? => NetworkImage(url),
+                        null => null,
+                      },
+                    ),
                     const SizedBox(width: 16),
-                    Expanded(child: Text(name, style: text.headlineSmall)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(name, style: text.headlineSmall),
+                          if (group?.handle case final handle?)
+                            Text('@$handle', style: text.bodyMedium),
+                          if (group?.type case final type?) ...[
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                GroupTypeBadge(type),
+                                if (group?.facultyAffiliation
+                                    case final faculty?)
+                                  Text(faculty, style: text.bodySmall),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
+                if (group?.description case final description?) ...[
+                  const SizedBox(height: 16),
+                  Text(description, style: text.bodyLarge),
+                ],
                 if (onFollow != null) ...[
                   const SizedBox(height: 12),
                   Align(

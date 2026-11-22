@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/academics.dart';
+import '../data/campus_groups.dart';
 import '../models/club_event.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
@@ -63,8 +64,8 @@ abstract interface class McMapBackend {
   Future<void> setOrganizationFollow(String id, bool following);
   Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled);
 
-  /// Public organization names keyed by the same stable slugs as events.
-  Future<Map<String, String>> fetchOrganizationNames();
+  /// Public organizations keyed by the same stable slugs as events.
+  Future<Map<String, CampusGroup>> fetchOrganizations();
 
   /// Saves Edit Profile changes (not the photo; see [uploadAvatar]).
   Future<void> updateProfile(StudentProfile profile);

@@ -12,6 +12,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/backend/mcmap_backend.dart';
 import 'package:mcmap/backend/supabase_backend.dart';
 import 'package:mcmap/data/academics.dart';
+import 'package:mcmap/data/campus_groups.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/main.dart';
 import 'package:mcmap/models/club_event.dart';
@@ -115,8 +116,12 @@ class FakeBackend implements McMapBackend {
   }
 
   @override
-  Future<Map<String, String>> fetchOrganizationNames() async => {
-    'faculty-of-science': 'Faculty of Science',
+  Future<Map<String, CampusGroup>> fetchOrganizations() async => {
+    'faculty-of-science': const CampusGroup(
+      id: 'faculty-of-science',
+      name: 'Faculty of Science',
+      type: OrganizationType.faculty,
+    ),
   };
 
   @override

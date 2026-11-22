@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
+import '../data/campus_groups.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
 import '../models/club_event.dart';
@@ -26,6 +27,7 @@ import '../social/mcgillian_widgets.dart';
 import '../social/social_graph.dart';
 import '../widgets/event_bits.dart';
 import '../widgets/froshie_tag.dart';
+import '../widgets/group_type_badge.dart';
 import '../widgets/initials_avatar.dart';
 import '../widgets/mcmap_logo.dart';
 
@@ -86,14 +88,18 @@ class _HomePageState extends State<HomePage> {
   Future<bool>? _organizationFollowsLoad;
   bool _usingLocalOrganizationFollows = false;
   final _pendingOrganizationChanges = <String>{};
-  Map<String, String> _organizationNames = const {};
+  Map<String, CampusGroup> _organizations = const {};
 
-  Map<String, String> get _otherOrganizations => {
+  /// Organizations outside the bundled catalog. Signed in, the server decides
+  /// which exist; the offline demo uses the bundled list.
+  Map<String, CampusGroup> get _otherOrganizations => {
+    if (widget.backend == null)
+      for (final group in campusGroups) group.id: group,
     for (final event in _events.values)
       if (event.clubId case final id?
           when !clubsById.containsKey(id) && event.club.isNotEmpty)
-        id: event.club,
-    for (final entry in _organizationNames.entries)
+        id: CampusGroup(id: id, name: event.club, type: event.clubType),
+    for (final entry in _organizations.entries)
       if (!clubsById.containsKey(entry.key)) entry.key: entry.value,
   };
   final _rsvps = LocalRsvps();
@@ -318,10 +324,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _loadOrganizationNames(McMapBackend backend) async {
+  Future<void> _loadOrganizations(McMapBackend backend) async {
     try {
-      final names = await backend.fetchOrganizationNames();
-      if (mounted) _changeClubState(() => _organizationNames = names);
+      final groups = await backend.fetchOrganizations();
+      if (mounted) _changeClubState(() => _organizations = groups);
     } catch (_) {
       // Event organizers and the bundled club directory remain available.
     }
@@ -353,7 +359,7 @@ class _HomePageState extends State<HomePage> {
     if (widget.backend case final backend?) {
       unawaited(_loadFromServer());
       _organizationFollowsLoad = _loadOrganizationFollows(backend);
-      unawaited(_loadOrganizationNames(backend));
+      unawaited(_loadOrganizations(backend));
     }
     if (widget.account != null && widget.backend != null) {
       unawaited(_loadPublishingGroups(widget.backend!));
@@ -527,7 +533,7 @@ class _HomePageState extends State<HomePage> {
   void _browseClubs({String query = ''}) => _openLivePage(
     () => ClubDirectoryPage(
       initialQuery: query,
-      organizationNames: _otherOrganizations,
+      organizations: _otherOrganizations,
       onOpenOrganization: _openGroup,
       followedIds: _clubProfile.followedClubIds,
       onFollow: _toggleFollow,
@@ -538,7 +544,7 @@ class _HomePageState extends State<HomePage> {
   void _openFollowing() => _openLivePage(
     () => FollowingPage(
       temporaryPreferences: _usingLocalOrganizationFollows,
-      organizationNames: _otherOrganizations,
+      organizations: _otherOrganizations,
       onOpenOrganization: _openGroup,
       autoRsvpIds: _clubProfile.clubAutoRsvpOptIns.keys,
       autoRsvpAction: _autoRsvpAction,
@@ -597,6 +603,7 @@ class _HomePageState extends State<HomePage> {
     () => OrganizationPage(
       id: id,
       name: name,
+      group: _otherOrganizations[id],
       following: _clubProfile.followedClubIds.contains(id),
       onFollow: () => _toggleFollow(id),
       autoRsvp: _clubProfile.clubAutoRsvpOptIns.containsKey(id),
@@ -750,6 +757,7 @@ class _HomePageState extends State<HomePage> {
     final text = Theme.of(context).textTheme;
     final now = DateTime.now();
     final showForYou = _discovery == _EventDiscovery.forYou && _query.isEmpty;
+    final organizations = _otherOrganizations;
     final matchingEvents = showForYou
         ? const <ClubFeedEntry>[]
         : buildClubEventFeed(
@@ -759,6 +767,8 @@ class _HomePageState extends State<HomePage> {
             followedOnly: _discovery == _EventDiscovery.following
                 ? _clubProfile.followedClubIds
                 : null,
+            matchesOrganization: (id) =>
+                organizations[id]?.searchRank(_query) != null,
           );
     final going = [
       for (final decision in _rsvps.decisions)
@@ -1036,22 +1046,32 @@ class _HomePageState extends State<HomePage> {
   List<Widget> _clubSearchResults(TextTheme text) {
     final query = normalizeClubSearch(_query);
     if (query.isEmpty) return const [];
-    final matches = searchClubCatalog(query);
+    final matches = searchOrganizations(query, _otherOrganizations.values);
     if (matches.isEmpty) return const [];
 
     const previewSize = 5;
     return [
       const SizedBox(height: 24),
       Text('Clubs & organizations', style: text.titleLarge),
-      for (final club in matches.take(previewSize))
-        ClubRow(
-          key: ValueKey(club.id),
-          club: club,
-          compact: true,
-          following: _clubProfile.followedClubIds.contains(club.id),
-          onOpen: () => _openClub(club),
-          onFollow: () => _toggleFollow(club.id),
-        ),
+      for (final match in matches.take(previewSize))
+        if (match.group case final group?)
+          OrganizationRow(
+            key: ValueKey(group.id),
+            group: group,
+            compact: true,
+            following: _clubProfile.followedClubIds.contains(group.id),
+            onOpen: () => _openGroup(group.id, group.name),
+            onFollow: () => _toggleFollow(group.id),
+          )
+        else if (match.club case final club?)
+          ClubRow(
+            key: ValueKey(club.id),
+            club: club,
+            compact: true,
+            following: _clubProfile.followedClubIds.contains(club.id),
+            onOpen: () => _openClub(club),
+            onFollow: () => _toggleFollow(club.id),
+          ),
       if (matches.length > previewSize)
         Align(
           alignment: Alignment.centerLeft,
@@ -1195,6 +1215,7 @@ class _EventCard extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final club = feedEntry?.club;
     final clubName = club?.name ?? event.club;
+    final groupType = (club ?? clubsById[event.clubId])?.type ?? event.clubType;
     final more = feedEntry?.additionalEvents ?? 0;
     final schedule = formatEventSchedule(context, event);
     final muted = text.bodySmall?.copyWith(color: McMapColors.slate);
@@ -1232,8 +1253,21 @@ class _EventCard extends StatelessWidget {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          if (club != null && upcoming)
-                            Text(previewLabel, style: muted),
+                          if (groupType != null || (club != null && upcoming))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 2,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  if (groupType != null)
+                                    GroupTypeBadge(groupType),
+                                  if (club != null && upcoming)
+                                    Text(previewLabel, style: muted),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),

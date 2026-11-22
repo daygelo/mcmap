@@ -135,7 +135,7 @@ arts-anthropology-asa|Anthropology Students’ Association (ASA)|29|studentSocie
 engineering-architecture-students-society-asa|Architecture Students Society (ASA)|12|studentSociety|ASA
 arts-ahcssa|Art History and Communication Studies Students’ Association (AHCSSA)|29|studentSociety|AHCSSA
 arts-science-asus|Arts & Science Undergraduate Society (ASUS)|42,18,29|studentSociety|ASUS
-aus|Arts Undergraduate Society (AUS)|29,28|studentSociety|AUS
+aus|Arts Undergraduate Society (AUS)|29,28|facultyAssociation|AUS
 science-aossum|Atmospheric and Oceanic Sciences Society of Undergraduates at McGill (AOSSUM)|18|studentSociety|AOSSUM
 ssmu-balkan-students-society-of-mcgill|Balkan Students’ Society of McGill|10|club
 ssmu-baltic-students-society-bss|Baltic Students Society (BSS)|10|club|BSS
@@ -210,7 +210,7 @@ ssmu-egyptian-students-association-2|Egyptian Students Association|10|club
 engineering-eegss|Electrical and Computer Engineering Graduate Student Society (EEGSS)|34,38|studentSociety|EEGSS
 engineering-electrical-computer-software-engineering-student-society-ecsess|Electrical, Computer, & Software Engineering Student Society (ECSESS)|12|studentSociety|ECSESS
 ssmu-mcgill-students-for-enactus|Enactus McGill|3,8|club
-engineering-engineering-undergraduate-society-eus|Engineering Undergraduate Society (EUS)|12|studentSociety|EUS
+engineering-engineering-undergraduate-society-eus|Engineering Undergraduate Society (EUS)|12|facultyAssociation|EUS
 engineering-engineers-in-action|Engineers in Action|12|club
 arts-egsa|English Graduate Students’ Association (EGSA)|41|studentSociety|EGSA
 desautels-entertainment-management-conference|Entertainment Management Conference|13|club
@@ -272,18 +272,18 @@ ssmu-little-forests-mcgill|Little Forests McGill|2|club
 ssmu-world-university-services-canada-wusc|Local Committee for the World University Services of Canada (WUSC) at McGill University|2|club|WUSC
 ssmu-lotus-dance-initative|Lotus Initiative|5|club
 arts-agelf|L’Association Générale des Étudiants de Langue et Littérature Françaises|29|studentSociety|AGELF
-mcgill-mcgss|Macdonald Campus Graduate Students’ Society|11|studentSociety|MCGSS
-mcgill-mcss|Macdonald Campus Students’ Society|11|studentSociety|MCSS
+mcgill-mcgss|Macdonald Campus Graduate Students’ Society|11|campusSociety|MCGSS
+mcgill-mcss|Macdonald Campus Students’ Society|11|campusSociety|MCSS
 ssmu-malaysian-and-singaporean-students-association-2|Malaysian and Singaporean Students’ Association (MASSA)|10|club|MASSA
 mame-first-year-council|MAME First-Year Council|22|firstYearCouncil|MAME FYC|Mechanical Engineering First Year Council
-desautels-mus|Management Undergraduate Society|13|studentSociety|MUS
+desautels-mus|Management Undergraduate Society|13|facultyAssociation|MUS
 engineering-materials-engineering-undergraduate-society-meus|Materials Engineering Undergraduate Society (MEUS)|12|studentSociety|MEUS
 ssmu-mcconnect|McConnect|3|club
 ssmu-mcgill-african-students-society-mass-2|McGill African Students Society (MASS)|10|club|MASS
 science-macss|McGill Anatomy & Cell Biology Students’ Society (MACSS)|18|studentSociety|MACSS
 ssmu-mcgill-armenian-students-association-2|McGill Armenian Students Association (MASA)|10|club|MASA
 ssmu-mcgill-arts-collective|McGill Arts Collective|4|club
-mcgill-maces|McGill Association of Continuing Education Students|11|studentSociety|MACES
+mcgill-maces|McGill Association of Continuing Education Students|11|campusSociety|MACES
 engineering-mcgill-association-of-mechanical-engineers-mame|McGill Association of Mechanical Engineers (MAME)|12|studentSociety|MAME
 ssmu-mcgill-association-of-north-american-born-asians-manaba|McGill Association of North American Born Asians (MANABA)|10|club|MANABA
 ssmu-mcgill-badminton-club|McGill Badminton Club|1|club
@@ -469,7 +469,7 @@ science-puls|Physiology Undergraduate League of Students (PULS)|18|studentSociet
 ssmu-players-theatre|Players’ Theatre|4|club
 arts-pssa|Political Science Students’ Association (PSSA)|29|studentSociety|PSSA
 ssmu-water-polo-club-poseidon-water-polo|Poseidon Water Polo|1|club
-mcgill-pgss|Post-Graduate Students’ Society|11|studentSociety|PGSS
+mcgill-pgss|Post-Graduate Students’ Society|11|campusSociety|PGSS
 ssmu-power-to-change|Power to Change (P2C)|10|club|P2C
 ssmu-projet-montreal-mcgill-students-association|Projet Montréal McGill Students Association|3,9|club
 engineering-promoting-opportunities-for-women-in-engineering-powe|Promoting Opportunities for Women in Engineering (POWE)|12|club|POWE
@@ -491,7 +491,7 @@ ssmu-salseros-2|Salseros McGill|4|club
 ssmu-herbivore-society-for-peace-and-justice|SCALE: Student Club for Animal Liberation and Ethics|9|club
 ssmu-school-of-music-montreal-somm|School of Music Montreal (SoMM)|4|club
 spot-gsa|School of Physical and Occupational Therapy Graduate Student Association (SPOT GSA)|37|studentSociety|SPOT GSA
-sus|Science Undergraduate Society (SUS)|18,28|studentSociety|SUS
+sus|Science Undergraduate Society (SUS)|18,28|facultyAssociation|SUS
 ssmu-shes-the-first|She’s the First|2|club
 ssmu-simplydonate|SimplyDonate|2|club
 ssmu-sky-campus-happiness-at-mcgill|SKY Campus Happiness at McGill|5|club
@@ -517,7 +517,7 @@ ssmu-student-research-initiative|Student Research Initiative (SRI)|8|club|SRI
 arts-science-sasss|Students’ Association of Sustainability, Science and Society (SASSS)|42|studentSociety|SASSS
 ssmu-students-association-of-multiple-sclerosis|Student’s Association for Multiple Sclerosis|2|club
 ssmu-students-offering-support-sos-2|Students Offering Support (SOS)|8|club|SOS
-mcgill-ssmu|Students’ Society of McGill University|11|studentSociety|SSMU
+mcgill-ssmu|Students’ Society of McGill University|11|campusSociety|SSMU
 desautels-suits-u|Suits U|13|club
 ssmu-swab-the-world-mcgill|Swab The World Mcgill|3|club
 ssmu-mcgill-students-chapter-of-swimability|Swimming With A Mission (SWAM) Montreal|3|club|SWAM

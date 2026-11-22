@@ -1,40 +1,23 @@
 import '../data/academics.dart';
 
-/// A self-reported club selection and its independent preferences.
-class ClubMembership {
-  const ClubMembership({this.showOnProfile = false, this.autoRsvpEnabledAt});
-
-  final bool showOnProfile;
-  final DateTime? autoRsvpEnabledAt;
-
-  ClubMembership copyWith({
-    bool? showOnProfile,
-    DateTime? autoRsvpEnabledAt,
-    bool clearAutoRsvp = false,
-  }) => ClubMembership(
-    showOnProfile: showOnProfile ?? this.showOnProfile,
-    autoRsvpEnabledAt: clearAutoRsvp
-        ? null
-        : autoRsvpEnabledAt ?? this.autoRsvpEnabledAt,
-  );
-}
-
 /// Academic onboarding data and independently editable club preferences.
 class UserProfile {
   const UserProfile({
     required this.degreeLevel,
     required this.faculty,
     this.year,
+    this.campus,
     this.firstYearAtMcGill = false,
     this.major,
     this.interests = const {},
-    this.memberships = const {},
+    this.clubAutoRsvpOptIns = const {},
     this.followedClubIds = const {},
     this.clubNotificationOptIns = const {},
   }) : assert(degreeLevel != DegreeLevel.undergraduate || year != null),
        assert(degreeLevel == DegreeLevel.exchangeOrContinuing || major != null);
 
   final DegreeLevel degreeLevel;
+  final AcademicCampus? campus;
 
   /// U-year ("U0"–"U4+"). Only set for undergraduates.
   final String? year;
@@ -56,15 +39,12 @@ class UserProfile {
   /// campus-wide events.
   final Set<String> interests;
 
-  final Map<String, ClubMembership> memberships;
+  /// Explicit opt-ins retained for followed organizations.
+  final Map<String, DateTime> clubAutoRsvpOptIns;
   final Set<String> followedClubIds;
 
   /// Enable times prevent notifications for events published before consent.
   final Map<String, DateTime> clubNotificationOptIns;
-
-  Iterable<String> get displayedClubIds => memberships.entries
-      .where((entry) => entry.value.showOnProfile)
-      .map((entry) => entry.key);
 
   bool get hasInterests => interests.isNotEmpty;
 
@@ -73,30 +53,25 @@ class UserProfile {
 
   UserProfile copyWith({
     Set<String>? interests,
-    Map<String, ClubMembership>? memberships,
+    Map<String, DateTime>? clubAutoRsvpOptIns,
     Set<String>? followedClubIds,
     Map<String, DateTime>? clubNotificationOptIns,
   }) => UserProfile(
     degreeLevel: degreeLevel,
     year: year,
+    campus: campus,
     firstYearAtMcGill: firstYearAtMcGill,
     faculty: faculty,
     major: major,
     interests: interests == null ? this.interests : Set.unmodifiable(interests),
-    memberships: memberships == null
-        ? this.memberships
-        : Map.unmodifiable(memberships),
+    clubAutoRsvpOptIns: clubAutoRsvpOptIns == null
+        ? this.clubAutoRsvpOptIns
+        : Map.unmodifiable(clubAutoRsvpOptIns),
     followedClubIds: followedClubIds == null
         ? this.followedClubIds
         : Set.unmodifiable(followedClubIds),
     clubNotificationOptIns: clubNotificationOptIns == null
         ? this.clubNotificationOptIns
         : Map.unmodifiable(clubNotificationOptIns),
-  );
-
-  UserProfile withClubIds(Set<String> ids) => copyWith(
-    memberships: {
-      for (final id in ids) id: memberships[id] ?? const ClubMembership(),
-    },
   );
 }

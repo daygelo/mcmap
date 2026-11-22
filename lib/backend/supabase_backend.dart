@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/academics.dart';
+import '../data/campus_groups.dart';
+import '../data/clubs.dart';
 import '../models/club_event.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
@@ -16,6 +18,7 @@ class SupabaseBackend implements McMapBackend {
 
   final SupabaseClient client;
   final _profileRevision = ValueNotifier(0);
+  final _onboardingSessionFollows = <String, Map<String, DateTime?>>{};
 
   @override
   ValueListenable<int> get profileRevision => _profileRevision;
@@ -38,6 +41,34 @@ class SupabaseBackend implements McMapBackend {
 
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
+    final uid = _uid;
+    final state = await client
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', uid)
+        .single();
+    if (state['onboarding_completed'] == true) return;
+
+    Map<String, DateTime?>? sessionFollows;
+    if (profile.followedClubIds.isNotEmpty) {
+      try {
+        await client.rpc<void>(
+          'change_organization_follows',
+          params: {'follow_ids': profile.followedClubIds.toList()},
+        );
+      } on PostgrestException catch (error) {
+        if (!isMissingOrganizationFollowsTable(error) &&
+            !_isMissingChangeFollowsFunction(error)) {
+          rethrow;
+        }
+        sessionFollows = {for (final id in profile.followedClubIds) id: null};
+        try {
+          sessionFollows.addAll(await fetchOrganizationFollows());
+        } on OrganizationFollowsUnavailable {
+          // The new account can finish onboarding with session-only follows.
+        }
+      }
+    }
     await client
         .from('profiles')
         .update({
@@ -51,8 +82,96 @@ class SupabaseBackend implements McMapBackend {
           'interests': profile.interests.toList(),
           'onboarding_completed': true,
         })
-        .eq('id', _uid);
+        .eq('id', uid);
+    if (sessionFollows != null) _onboardingSessionFollows[uid] = sessionFollows;
     _profileRevision.value++;
+  }
+
+  @override
+  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+    final uid = _uid;
+    if (_onboardingSessionFollows.containsKey(uid)) {
+      throw const OrganizationFollowsUnavailable();
+    }
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await client
+          .from('profile_organization_follows')
+          .select('follows')
+          .eq('profile_id', uid);
+    } on PostgrestException catch (error) {
+      if (isMissingOrganizationFollowsTable(error)) {
+        throw const OrganizationFollowsUnavailable();
+      }
+      rethrow;
+    }
+    final follows =
+        rows.firstOrNull?['follows'] as Map<String, dynamic>? ?? const {};
+    return {
+      for (final entry in follows.entries)
+        entry.key: switch (entry.value) {
+          {'auto_rsvp_enabled_at': final String value} => DateTime.tryParse(
+            value,
+          ),
+          _ => null,
+        },
+    };
+  }
+
+  @visibleForTesting
+  static bool isMissingOrganizationFollowsTable(PostgrestException error) =>
+      switch (error.code) {
+        'PGRST205' => error.message.contains(
+          "Could not find the table 'public.profile_organization_follows'",
+        ),
+        '42P01' => error.message.contains(
+          'relation "public.profile_organization_follows" does not exist',
+        ),
+        _ => false,
+      };
+
+  bool _isMissingChangeFollowsFunction(PostgrestException error) =>
+      error.code == 'PGRST202' &&
+      error.message.startsWith(
+        'Could not find the function public.change_organization_follows(',
+      );
+
+  @override
+  Future<void> setOrganizationFollow(String id, bool following) =>
+      client.rpc<void>(
+        'change_organization_follows',
+        params: {
+          'follow_ids': following ? [id] : <String>[],
+          if (!following) 'unfollow_id': id,
+        },
+      );
+
+  @override
+  Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled) async {
+    final consent = await client.rpc<String?>(
+      'set_organization_auto_rsvp',
+      params: {'group_slug': id, 'enabled': enabled},
+    );
+    return consent == null ? null : DateTime.parse(consent);
+  }
+
+  @override
+  Future<Map<String, CampusGroup>> fetchOrganizations() async {
+    const pageSize = 500;
+    final groups = <String, CampusGroup>{};
+    for (var offset = 0; ; offset += pageSize) {
+      // All columns: naming short_name/handle would fail on a database that
+      // hasn't run the group details migration yet.
+      final rows = await client
+          .from('groups')
+          .select()
+          .order('slug')
+          .range(offset, offset + pageSize - 1);
+      for (final row in rows) {
+        groups[row['slug'] as String] = CampusGroup.fromRow(row);
+      }
+      if (rows.length < pageSize) return groups;
+    }
   }
 
   @override
@@ -109,14 +228,62 @@ class SupabaseBackend implements McMapBackend {
   // Events & RSVPs
   // -------------------------------------------------------------------------
 
+  static const _eventColumns = '*, groups(slug, name, avatar_url, type)';
+
   @override
   Future<List<ClubEvent>> fetchEvents() async {
+    const pageSize = 500;
+    final events = <ClubEvent>[];
+    for (var offset = 0; ; offset += pageSize) {
+      final rows = await client
+          .from('events')
+          .select(_eventColumns)
+          .order('starts_at', ascending: true, nullsFirst: false)
+          .order('id', ascending: true)
+          .range(offset, offset + pageSize - 1);
+      events.addAll(rows.map(_event));
+      if (rows.length < pageSize) return events;
+    }
+  }
+
+  @override
+  Future<List<PublishingGroup>> fetchPublishingGroups() async {
     final rows = await client
-        .from('events')
-        .select('*, groups(slug, name, avatar_url)')
-        .order('starts_at', ascending: true, nullsFirst: false)
-        .limit(500);
-    return [for (final row in rows) _event(row)];
+        .from('group_publishers')
+        .select('group_id, groups!inner(name)')
+        .eq('profile_id', _uid);
+    return [
+      for (final row in rows)
+        PublishingGroup(
+          id: row['group_id'] as String,
+          name: row['groups']['name'] as String,
+        ),
+    ]..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  @override
+  Future<ClubEvent> publishEvent({
+    required String eventId,
+    required String groupId,
+    required String title,
+    required String description,
+    required DateTime startsAt,
+    DateTime? endsAt,
+    required String location,
+  }) async {
+    final row = await client.rpc<Map<String, dynamic>>(
+      'publish_event',
+      params: {
+        'event_id': eventId,
+        'organization_id': groupId,
+        'event_title': title,
+        'event_description': description,
+        'event_start': startsAt.toUtc().toIso8601String(),
+        'event_end': endsAt?.toUtc().toIso8601String(),
+        'event_location': location,
+      },
+    );
+    return _event(row);
   }
 
   @override
@@ -193,7 +360,11 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
-  Future<void> signOut() => client.auth.signOut();
+  Future<void> signOut() async {
+    final id = client.auth.currentUser?.id;
+    await client.auth.signOut();
+    _onboardingSessionFollows.remove(id);
+  }
 
   // -------------------------------------------------------------------------
   // Row → model
@@ -203,6 +374,7 @@ class SupabaseBackend implements McMapBackend {
     final degree = degreeLevelFromDb(row['degree_level']);
     final faculty = row['faculty'] as String?;
     final done = row['onboarding_completed'] == true;
+    final sessionFollows = _onboardingSessionFollows[row['id']];
     return AccountProfile(
       id: row['id'] as String,
       handle: row['handle'] as String,
@@ -217,6 +389,12 @@ class SupabaseBackend implements McMapBackend {
               firstYearAtMcGill: row['is_first_year_u1'] == true,
               faculty: faculty,
               major: row['major'] as String?,
+              followedClubIds: sessionFollows?.keys.toSet() ?? const {},
+              clubAutoRsvpOptIns: {
+                if (sessionFollows != null)
+                  for (final entry in sessionFollows.entries)
+                    entry.key: ?entry.value,
+              },
               interests: Set.unmodifiable(
                 (row['interests'] as List? ?? const []).cast<String>(),
               ),
@@ -237,9 +415,12 @@ class SupabaseBackend implements McMapBackend {
       row['location_name'] as String? ?? '',
       clubId: group?['slug'] as String?,
       clubAvatarUrl: group?['avatar_url'] as String?,
+      clubType: OrganizationType.fromDb(group?['type']),
       isFrosh: row['is_froshie_event'] == true,
       publishedAt: time('published_at'),
+      createdAt: time('created_at'),
       startsAt: time('starts_at'),
+      endsAt: time('ends_at'),
       description: row['full_description'] as String?,
       synopsis: row['ai_synopsis'] as String?,
       latitude: number('latitude'),
@@ -257,7 +438,7 @@ class SupabaseBackend implements McMapBackend {
       id: row['id'] as String,
       name: (row['full_name'] as String?)?.trim().isNotEmpty == true
           ? row['full_name'] as String
-          : '@${row['handle']}',
+          : 'McMap Student',
       handle: row['handle'] as String,
       faculty: row['faculty'] as String? ?? '',
       major: row['major'] as String? ?? '',

@@ -3,8 +3,11 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:mcmap/main.dart';
 import 'package:mcmap/pages/home_page.dart';
+import 'package:mcmap/pages/map_page.dart';
+import 'package:mcmap/pages/student/suggested_clubs.dart';
+import 'package:mcmap/widgets/mcmap_logo.dart';
 import 'package:mcmap/theme/app_theme.dart';
-import 'package:mcmap/pages/student/settings_page.dart';
+import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/widgets/profile_stats.dart';
@@ -61,7 +64,9 @@ Future<void> _goToInterests(WidgetTester tester) async {
 
 Future<void> _skipClubs(WidgetTester tester) async {
   expect(find.text('Step 3 of 3'), findsOneWidget);
-  await tester.tap(find.text('Skip for now'));
+  await tester.tap(
+    find.textContaining(RegExp(r'^Skip (for now|optional groups)$')),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -81,7 +86,25 @@ void main() {
     );
 
     expect(find.text('McMap'), findsOneWidget);
-    expect(find.text('Find club events'), findsOneWidget);
+    expect(find.text('Find club events'), findsNothing);
+    final search = find.byType(SearchBar);
+    expect(search.hitTestable(), findsOneWidget);
+    expect(
+      tester.getTopLeft(search).dy -
+          tester.getBottomLeft(find.byType(AppBar)).dy,
+      inInclusiveRange(0, 20),
+    );
+    final wordmark = find.byType(McMapWordmark);
+    final logo = find.descendant(
+      of: wordmark,
+      matching: find.byType(McMapLogo),
+    );
+    expect(logo, findsOneWidget);
+    expect(tester.getSize(logo), const Size.square(32));
+    expect(
+      tester.getTopRight(logo).dx,
+      lessThan(tester.getTopLeft(find.text('McMap')).dx),
+    );
     final header = tester.element(find.text('McMap'));
     final appBar = tester.widget<AppBar>(find.byType(AppBar));
     final titleStyle = DefaultTextStyle.of(header).style;
@@ -135,52 +158,68 @@ void main() {
     expect(find.text('No club events match your search.'), findsOneWidget);
   });
 
-  testWidgets('the club feed ends after events at four viewport widths', (
-    tester,
-  ) async {
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    for (final width in [320.0, 390.0, 768.0, 1280.0]) {
-      await tester.binding.setSurfaceSize(Size(width, 600));
-      await tester.pumpWidget(
-        MaterialApp(
-          key: ValueKey(width),
-          theme: buildMcMapTheme(),
-          home: const HomePage(),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final feed = find.byType(ListView).first;
-      final lastEvent = find.text('Campus Coding Meetup');
-      final scrollable = tester.state<ScrollableState>(
-        find.descendant(of: feed, matching: find.byType(Scrollable)).first,
-      );
-      // The lazy list only estimates its length until the last cards are
-      // built, so keep jumping to the end until the extent stops growing.
-      double? extent;
-      while (extent != scrollable.position.maxScrollExtent) {
-        extent = scrollable.position.maxScrollExtent;
-        scrollable.position.jumpTo(extent);
+  testWidgets(
+    'the Home feed ends with View All Events at four viewport widths',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final width in [320.0, 390.0, 768.0, 1280.0]) {
+        await tester.binding.setSurfaceSize(Size(width, 600));
+        await tester.pumpWidget(
+          MaterialApp(
+            key: ValueKey(width),
+            theme: buildMcMapTheme(),
+            home: const HomePage(),
+          ),
+        );
         await tester.pumpAndSettle();
-      }
+        final header = tester.getRect(find.byType(AppBar));
+        expect(
+          header.contains(tester.getCenter(find.byType(McMapLogo))),
+          isTrue,
+        );
+        expect(header.contains(tester.getCenter(find.text('McMap'))), isTrue);
+        final feed = find.byType(ListView).first;
+        final lastEvent = find.text('Campus Coding Meetup');
+        final scrollable = tester.state<ScrollableState>(
+          find.descendant(of: feed, matching: find.byType(Scrollable)).first,
+        );
+        // The lazy list only estimates its length until the last cards are
+        // built, so keep jumping to the end until the extent stops growing.
+        double? extent;
+        while (extent != scrollable.position.maxScrollExtent) {
+          extent = scrollable.position.maxScrollExtent;
+          scrollable.position.jumpTo(extent);
+          await tester.pumpAndSettle();
+        }
 
-      for (final label in [
-        'Explore campus',
-        'Campus map',
-        'Buildings',
-        'Dining',
-        'Parking',
-      ]) {
-        expect(find.text(label), findsNothing);
+        for (final label in [
+          'Explore campus',
+          'Campus map',
+          'Buildings',
+          'Dining',
+          'Parking',
+        ]) {
+          expect(find.text(label), findsNothing);
+        }
+        expect(lastEvent.hitTestable(), findsOneWidget);
+        final lastCard = find.ancestor(
+          of: lastEvent,
+          matching: find.byType(Card),
+        );
+        final viewAll = find.widgetWithText(FilledButton, 'View All Events');
+        expect(viewAll.hitTestable(), findsOneWidget);
+        expect(
+          tester.getRect(viewAll).top,
+          greaterThan(tester.getRect(lastCard).bottom),
+        );
+        expect(
+          tester.getRect(feed).bottom - tester.getRect(viewAll).bottom,
+          24,
+        );
+        expect(tester.takeException(), isNull);
       }
-      expect(lastEvent.hitTestable(), findsOneWidget);
-      final lastCard = find.ancestor(
-        of: lastEvent,
-        matching: find.byType(Card),
-      );
-      expect(tester.getRect(feed).bottom - tester.getRect(lastCard).bottom, 24);
-      expect(tester.takeException(), isNull);
-    }
-  });
+    },
+  );
 
   testWidgets('shows an RSVP in Profile and syncs cancellation to Home', (
     tester,
@@ -317,7 +356,7 @@ void main() {
   });
 
   testWidgets(
-    'keeps privacy choices independent and preserves RSVP visibility',
+    'offers only RSVP privacy and preserves existing RSVP visibility',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 1150));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -330,23 +369,22 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsNothing);
-      List<RadioGroup<StudentVisibility>> groups() => tester
-          .widgetList<RadioGroup<StudentVisibility>>(
-            find.byType(RadioGroup<StudentVisibility>),
-          )
-          .toList();
-      expect(groups().map((group) => group.groupValue?.name), [
-        'private',
-        'private',
-      ]);
-      await tester.tap(find.text('Public').first);
+      final radioGroup = find.byType(RadioGroup<StudentVisibility>);
+      StudentVisibility? selected() =>
+          tester.widget<RadioGroup<StudentVisibility>>(radioGroup).groupValue;
+      expect(radioGroup, findsOneWidget);
+      expect(find.text('Who can see my RSVPs?'), findsOneWidget);
+      expect(find.text('Who can view my profile?'), findsNothing);
+      for (final option in StudentVisibility.values) {
+        expect(find.text(option.label), findsOneWidget);
+      }
+      expect(selected(), StudentVisibility.private);
+      await tester.tap(find.text('Friends'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Friends').last);
+      expect(selected(), StudentVisibility.friends);
+      await tester.tap(find.text('Public'));
       await tester.pumpAndSettle();
-      expect(groups().map((group) => group.groupValue?.name), [
-        'public',
-        'friends',
-      ]);
+      expect(selected(), StudentVisibility.public);
       await tester.pageBack();
       await tester.pumpAndSettle();
 
@@ -354,10 +392,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Map'));
       await tester.pumpAndSettle();
-      expect(
-        find.text('Campus map is coming soon.').hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
       await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
       expect(
@@ -372,10 +407,7 @@ void main() {
       );
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(groups().map((group) => group.groupValue?.name), [
-        'public',
-        'friends',
-      ]);
+      expect(selected(), StudentVisibility.public);
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -423,13 +455,21 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(find.text('Coding').hitTestable(), findsOneWidget);
+    expect(find.text('Software Engineering · Engineering'), findsNothing);
+    expect(find.text('Coding').hitTestable(), findsNothing);
     expect(find.text('Board Game Night'), findsOneWidget);
+    await tester.tap(find.text('Discover Clubs'));
+    await tester.pumpAndSettle();
+    final recommendations = tester.widget<SuggestedClubs>(
+      find.byType(SuggestedClubs),
+    );
+    expect(recommendations.faculty, 'Engineering');
+    expect(recommendations.major, 'Software Engineering');
+    expect(recommendations.interests, contains('Coding'));
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Coding').hitTestable(), findsOneWidget);
-    await tester.tap(find.text('2 Club Memberships'));
+    await tester.tap(find.text('5 Following'));
     await tester.pumpAndSettle();
     expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
     expect(find.text('Mcgill Board Game Students’ Society'), findsOneWidget);
@@ -456,25 +496,19 @@ void main() {
     await tester.pumpAndSettle();
     await _skipClubs(tester);
 
-    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(
-      find.textContaining('Showing events for U2 Engineering students'),
-      findsOneWidget,
-    );
+    expect(find.text('Software Engineering · Engineering'), findsNothing);
+    expect(find.textContaining('Showing events for'), findsNothing);
+    expect(find.text('Suggested events'), findsOneWidget);
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Software Engineering · U2'), findsOneWidget);
-    await tester.tap(find.text('0 Club Memberships'));
+    expect(find.text('3 Following'), findsOneWidget);
+    expect(find.text('Your Club Memberships'), findsNothing);
+    expect(find.text('Add Clubs'), findsNothing);
+    await tester.tap(find.text('3 Following'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add Clubs'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(SearchBar), 'MESA');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('McGill Esports Student’s Association'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save Clubs'));
-    await tester.pumpAndSettle();
-    expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
+    expect(find.text('Students’ Society of McGill University'), findsOneWidget);
+    expect(find.text('Browse Clubs'), findsOneWidget);
   });
 
   testWidgets('U-year only appears for undergraduates', (tester) async {
@@ -538,10 +572,11 @@ void main() {
     await tester.pumpAndSettle();
     await _skipClubs(tester);
 
-    expect(
-      find.text('Undeclared / Freshman Program · Science'),
-      findsOneWidget,
-    );
+    expect(find.text('Undeclared / Freshman Program · Science'), findsNothing);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Undeclared / Freshman Program · U0'), findsOneWidget);
+    expect(find.text('Science'), findsOneWidget);
   });
 
   testWidgets('exchange students can continue without a major', (tester) async {
@@ -712,7 +747,8 @@ void main() {
       await tester.tap(find.text('Chloé Gagnon'));
       await tester.pumpAndSettle();
 
-      expect(find.text('@chloe.g'), findsOneWidget);
+      expect(find.text('@chloe.g'), findsNothing);
+      expect(find.text('Chloé Gagnon'), findsOneWidget);
       expect(find.byType(FroshieTag), findsOneWidget, reason: 'U1 first-year');
       expect(statCount(tester), 31);
       await tester.tap(find.text('Add Friend'));

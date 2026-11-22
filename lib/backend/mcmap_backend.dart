@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/academics.dart';
+import '../data/campus_groups.dart';
 import '../models/club_event.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
@@ -31,6 +32,19 @@ class AccountProfile {
   bool get onboardingCompleted => academics != null;
 }
 
+/// An organization verified by the server for the current publisher.
+class PublishingGroup {
+  const PublishingGroup({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
+/// The server does not expose the table used to load organization follows.
+class OrganizationFollowsUnavailable implements Exception {
+  const OrganizationFollowsUnavailable();
+}
+
 /// Everything the app reads from or writes to the server. The app runs
 /// without one in demo mode (and in tests), using in-memory sample data.
 abstract interface class McMapBackend {
@@ -43,6 +57,16 @@ abstract interface class McMapBackend {
   /// Saves onboarding steps 2–3 and marks onboarding complete.
   Future<void> completeOnboarding(UserProfile profile);
 
+  /// Keys are followed catalog IDs. A timestamp represents explicit auto-RSVP consent.
+  /// Throws [OrganizationFollowsUnavailable] when the follows table is missing.
+  Future<Map<String, DateTime?>> fetchOrganizationFollows();
+
+  Future<void> setOrganizationFollow(String id, bool following);
+  Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled);
+
+  /// Public organizations keyed by the same stable slugs as events.
+  Future<Map<String, CampusGroup>> fetchOrganizations();
+
   /// Saves Edit Profile changes (not the photo; see [uploadAvatar]).
   Future<void> updateProfile(StudentProfile profile);
 
@@ -51,6 +75,17 @@ abstract interface class McMapBackend {
   Future<void> removeAvatar();
 
   Future<List<ClubEvent>> fetchEvents();
+  Future<List<PublishingGroup>> fetchPublishingGroups();
+  Future<ClubEvent> publishEvent({
+    required String eventId,
+    required String groupId,
+    required String title,
+    required String description,
+    required DateTime startsAt,
+    DateTime? endsAt,
+    required String location,
+  });
+
   Future<Map<String, StudentVisibility>> fetchMyRsvps();
 
   /// Null cancels the RSVP.

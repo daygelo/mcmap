@@ -65,7 +65,8 @@ void main() {
       faculty: 'Engineering',
       major: 'Software Engineering',
       year: 'U2',
-      memberships: {'selected': ClubMembership(autoRsvpEnabledAt: enabledAt)},
+      followedClubIds: const {'selected'},
+      clubAutoRsvpOptIns: {'selected': enabledAt},
     );
     final rsvps = LocalRsvps();
 
@@ -120,9 +121,7 @@ void main() {
     rsvps.onPublished(eligible, profile, now: now);
     expect(rsvps.visibilityFor(eligible.id), StudentVisibility.private);
 
-    final disabled = profile.copyWith(
-      memberships: {'selected': const ClubMembership()},
-    );
+    final disabled = profile.copyWith(clubAutoRsvpOptIns: {});
     rsvps.onPublished(event('disabled'), disabled, now: now);
     expect(rsvps.visibilityFor('disabled'), isNull);
     expect(rsvps.visibilityFor(eligible.id), StudentVisibility.private);
@@ -134,7 +133,11 @@ void main() {
     rsvps.onPublished(eligible, profile, now: now);
     expect(rsvps.visibilityFor(eligible.id), StudentVisibility.public);
 
-    rsvps.onPublished(event('removed'), profile.withClubIds({}), now: now);
+    rsvps.onPublished(
+      event('removed'),
+      profile.copyWith(followedClubIds: {}),
+      now: now,
+    );
     expect(rsvps.visibilityFor('removed'), isNull);
     expect(rsvps.visibilityFor(eligible.id), StudentVisibility.public);
   });

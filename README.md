@@ -23,10 +23,23 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      storage buckets. It also creates a profile row for any existing accounts.
    - `supabase/migrations/20261121000200_allow_encoded_group_slugs.sql`:
      lets group slugs contain `%` (one catalog ID keeps URL-encoded accents).
+   - `supabase/migrations/20261122100000_more_group_types.sql`: adds the
+     `campus_society`, `faculty_association` and `research_group` types. Run
+     it on its own, after the migrations described further down.
+   - `supabase/migrations/20261122100100_group_details.sql`: adds
+     `short_name`, `handle` and `faculty_affiliation` to `groups` and sets the
+     right types for student governance.
+   - `supabase/migrations/20261122100200_merge_duplicate_groups.sql`: merges
+     the first seed's SSMU, PGSS, EUS and MUS into their catalog groups, moving
+     events, RSVPs, publishers and follows. Running an older `seed.sql`
+     afterwards would add the duplicates back.
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
-   match the app's club IDs. Event dates are relative to when you run it.
+   match the app's club IDs. Event dates are relative to when you run it. It
+   needs every migration, and is safe to run again. Groups outside the catalog
+   live in `lib/data/campus_groups.dart`; `metadata.verified` is false for the
+   ones without a confirming public page.
 4. Enable email/password authentication in **Authentication → Providers**.
 5. In **Authentication → URL Configuration**, configure the Site URL and redirect URLs if email confirmation is enabled.
 6. Optionally disable email confirmation for immediate account login during development.
@@ -36,14 +49,14 @@ A Flutter app with McGill email/password authentication powered by Supabase.
 `AuthGate` (in `lib/main.dart`) loads the user's `profiles` row:
 
 - `onboarding_completed = false` → academic profile → interests (skippable)
-  → clubs, then saves everything to `profiles` and opens the app.
+  → organizations to follow (skippable), then saves the selections and profile.
 - `onboarding_completed = true` → straight into the McMap app.
 
 Saved in Supabase: academic profile and interests, name/bio/photo edits
 (photos go to the `avatars` bucket under `<user id>/`), RSVPs, and
 McGillians (follow requests to private profiles stay `requested`).
-Still on-device only: club memberships, followed clubs, notification
-opt-ins and the privacy settings. Those need tables of their own.
+Organization follows are also saved after the migration below. Event notification
+opt-ins and the default RSVP audience remain session preferences.
 
 ### Offline demo
 
@@ -81,49 +94,85 @@ display name and run the catalog and onboarding tests. The snapshot excludes
 SSMU services and independent groups, seasonal recreation listings, and
 groups outside the listed sources.
 
-Onboarding and club management share `UserProfile`. Memberships are
-self-reported and keyed by catalog ID. They start private with auto-RSVP off.
-Hiding keeps the selection and opt-in. Removing drops both preferences for that club
-and keeps prior event decisions. In the offline demo, profile data and
-RSVPs are session-only; when signed in they're stored in Supabase (see above).
+Organization follows use canonical catalog IDs in `UserProfile.followedClubIds`.
+The Following filter composes with text search. Club details, Home, and Profile
+share RSVP decisions.
 
-For authenticated integration, persist the profile and per-club preferences
-under the verified user ID. The server must enforce profile and membership
-visibility. Preserve explicit RSVP decisions, including cancellations, and
-key RSVP writes uniquely by user and event. Keep automatic RSVPs private
-unless server-side consent and authorization explicitly permit another audience.
+The owner-only Following page links to the Event updates inbox. Notification
+opt-ins start off and unfollowing clears them. The inbox deduplicates events
+by ID for the session. The `HomePage.publications` input also exercises
+existing explicit auto-RSVP consent. An opt-in applies only to eligible
+publications after its timestamp and does not override prior RSVP decisions.
+Students can manage this preference both in **Profile → Following**
+and on an organization's details page.
 
-The organizer publication contract needs stable event and catalog club IDs,
-publication and start timestamps, cancellation state, and a server-verified
-in-app RSVP eligibility signal. Trigger automation on new publications after
-opt-in. Recheck membership, timing, restrictions, and existing decisions in the
-same backend operation before creating a Going RSVP. The in-memory
-`HomePage.publications` input demonstrates this behavior in tests. Demo
-sample events are unlinked and there is no live publication source.
+### Academic follows in onboarding
 
-### Following, event updates, and profile previews
+The organization picker preselects researched student associations from
+`lib/data/academic_auto_follows.dart`. Each rule carries its catalog ID,
+eligibility, and source. The picker lets students deselect defaults or skip
+optional groups while retaining the academic selections they approved. Campus
+is an optional onboarding input. Confirmed program-campus mappings may fill
+a blank, and an uncertain or other campus leaves campus-specific defaults off.
 
-Following is independent of self-reported membership and uses the same
-catalog IDs. The Following filter matches event club IDs and composes with
-text search. The sample feed has no verified club IDs. Club details require
-a published event with a future start timestamp for the upcoming list. Feed,
-club details, and Profile share the same local RSVP decisions.
+The final choices use the same Following records as manual follows. Defaults
+run only in onboarding, so later sign-ins and profile edits never re-add an
+unfollowed association. New follows leave both event preferences off.
 
-The owner-only Following page links to the in-app Event updates inbox.
-(Unfollowing clears the club's notification opt-in.) Opt-ins default to off and
-record their enable time. The inbox uses `HomePage.publications` and
-deduplicates by event ID for the session. It is independent of auto-RSVP.
-Production delivery needs persisted follow/opt-in records keyed by authenticated
-user and catalog club IDs, an organizer publication source, recipient
-authorization, and idempotent delivery keyed by user and event.
+When the Following table or its write RPC is specifically unavailable,
+signed-in students can finish onboarding and see their choices for the current
+session. The Following page displays the temporary-storage notice. Permission
+or network failures still surface as save errors. The updated seed provides
+the verified catalog rows for local development. Existing deployments may
+have short legacy group slugs alongside canonical catalog slugs. Coordinate
+event and publisher links before reconciling those rows.
 
-The private management list retains all memberships. The owner's Profile
-presentation derives its displayed memberships from `showOnProfile`.
-The read-only preview additionally gates that presentation on Profile privacy.
-It omits RSVP history, private management controls, and the Following list.
-The backend must independently authorize profile access and return only
-memberships visible to the requesting user. The preview supplies no friend
-authorization or public endpoint.
+### Organization Following migration
+
+Apply all Supabase migrations through
+`20261121000500_organization_follows.sql` in order before deploying the new
+client. Stop legacy membership writers before the cutover so their final
+saved selections are included. The migration copies each saved organization
+once per account and keeps explicit auto-RSVP timestamps, leaving the old
+records available for rollback. It does not modify profile or RSVP rows.
+There was no persisted store for the previous Following list, so older
+session-only follows and memberships cannot be recovered after a restart.
+
+To verify the actual backfill and row-level security, use a disposable local
+Supabase database with migrations applied through
+`20261121000400_club_memberships.sql` only. The test seeds legacy data, runs
+the new migration, verifies the result, and rolls everything back.
+
+```bash
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/organization_follows.sql
+```
+
+### Organization auto-RSVP
+
+Apply `20261121000600_organization_auto_rsvp.sql` after the Following
+migration. The authenticated preference is stored on the owner's organization
+follow row and keyed by the same stable group slug used in events. Enabling
+records the server timestamp. Disabling or unfollowing removes it without
+changing RSVP history. Offline preferences are session-only.
+
+The local publication stream demonstrates private automatic RSVPs. Production
+background automation is pending. A server-side publication worker needs to
+process newly visible events, check exact group identity and consent time,
+require explicit unrestricted eligibility, and atomically preserve manual
+RSVP and cancellation decisions with one durable record per user and event.
+Persist cancellations so a replay cannot recreate an RSVP. The migration
+defaults new events to ineligible until the publication source explicitly
+marks them unrestricted. Existing eligibility flags should be audited before
+a live worker consumes them.
+
+With the migrations applied to a local Supabase instance, run the preference
+and authorization test:
+
+```bash
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/organization_auto_rsvp.sql
+```
 
 ### Integrated student profile
 
@@ -134,4 +183,43 @@ and keeps editable presentation fields, including image bytes, in Gabby's
 `StudentProfile`. Suggestions read the live edited academic labels and
 interests from the presentation. Friend requests and connections remain in
 `SocialGraph` and are separate from follows. The original profile statistics
-remain in place, with membership and following counts on a secondary row.
+remain in place, with the organization Following count below the profile header.
+
+## Event publishing
+
+Signed-in accounts with a verified publisher assignment see **Create** between
+**Map** and **Profile**. The organization selector lists their assigned groups.
+The schedule picker uses the device's local time zone and sends UTC timestamps.
+A successful publication opens the event details and adds the event to Home
+discovery. The offline demo has no publishing access.
+
+Apply `supabase/migrations/20261121000300_event_publishing.sql` to the target
+database before enabling publishing. A database administrator should verify the
+organizer's authority and manage `public.group_publishers` through the
+Supabase SQL editor or a trusted server workflow. For example, replace the
+profile UUID and group slug below with the verified account and organization.
+
+```sql
+insert into public.group_publishers (profile_id, group_id, role)
+select 'VERIFIED_PROFILE_UUID'::uuid, id, 'president'
+from public.groups
+where slug = 'VERIFIED_GROUP_SLUG'
+on conflict (profile_id, group_id) do update set role = excluded.role;
+```
+
+Available roles are `president`, `coordinator`, `faculty_representative` and
+`delegated_publisher`. Delete the corresponding assignment to revoke access.
+Signed-in users can read their own assignments. The publishing function verifies
+the assignment, sets the creator from the signed-in account and records the
+publication time in the existing events table.
+
+### Local database authorization test
+
+With the repository migrations applied to a local Supabase instance, use a local
+Postgres administrator connection. The script switches to the authenticated role
+with fixture identities and rolls back its data at the end.
+
+```bash
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/event_publishing.sql
+```

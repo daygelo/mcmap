@@ -1,15 +1,71 @@
 import 'club_catalog_data.dart';
 
+/// What kind of organization a group is. [dbValue] is `groups.type`.
 enum OrganizationType {
-  club('Club'),
-  designTeam('Design team'),
-  studentSociety('Student society'),
-  firstYearCouncil('First-year council'),
-  firstYearCommittee('First-year committee'),
-  firstYearSociety('First-year society');
+  club('Club', 'club'),
+  designTeam('Design Team', 'design_team'),
+  studentSociety('Society', 'society'),
+  campusSociety('Campus Society', 'campus_society'),
+  facultyAssociation('Faculty Association', 'faculty_association'),
+  researchGroup('Research Group', 'research_group'),
+  firstYearCouncil('First-Year Council', 'first_year_council'),
+  firstYearCommittee('First-Year Committee', 'first_year_committee'),
+  firstYearSociety('First-Year Society', 'first_year_society'),
+  studentAssociation('Student Association', 'student_association'),
+  facultyAffiliation('Faculty Association', 'faculty_affiliation'),
+  faculty('Faculty', 'faculty');
 
-  const OrganizationType(this.label);
+  const OrganizationType(this.label, this.dbValue);
   final String label;
+  final String dbValue;
+
+  static OrganizationType? fromDb(Object? value) =>
+      values.where((type) => type.dbValue == value).firstOrNull;
+}
+
+/// Quick filters for browsing organizations.
+enum OrganizationFilter {
+  all('All', {}),
+  clubs('Clubs', {OrganizationType.club, OrganizationType.designTeam}),
+  societies('Societies', {
+    OrganizationType.studentSociety,
+    OrganizationType.campusSociety,
+    OrganizationType.studentAssociation,
+  }),
+  research('Research Groups', {OrganizationType.researchGroup}),
+  faculty('Faculty Associations', {
+    OrganizationType.facultyAssociation,
+    OrganizationType.facultyAffiliation,
+    OrganizationType.faculty,
+  }),
+  firstYear('First-Year', {
+    OrganizationType.firstYearCouncil,
+    OrganizationType.firstYearCommittee,
+    OrganizationType.firstYearSociety,
+  });
+
+  const OrganizationFilter(this.label, this.types);
+  final String label;
+  final Set<OrganizationType> types;
+
+  bool matches(OrganizationType? type) => this == all || types.contains(type);
+}
+
+/// 0 exact, 1 a word starts with the query, 2 contained anywhere, null none.
+/// Inputs must already be normalized.
+int? organizationSearchRank(Iterable<String> terms, String query) {
+  int? best;
+  for (final term in terms) {
+    final rank = term == query
+        ? 0
+        : term.startsWith(query) || term.contains(' $query')
+        ? 1
+        : term.contains(query)
+        ? 2
+        : null;
+    if (rank != null && (best == null || rank < best)) best = rank;
+  }
+  return best;
 }
 
 class ClubOrganization {
@@ -34,6 +90,9 @@ class ClubOrganization {
   String get category => clubCatalogSources[sourceKeys.first]!.$1;
   Iterable<String> get sourceUrls =>
       sourceKeys.map((key) => clubCatalogSources[key]!.$2);
+
+  int? searchRank(String normalizedQuery) =>
+      organizationSearchRank(_searchTerms, normalizedQuery);
 
   bool matches(String normalizedQuery) =>
       _searchTerms.any((term) => term.contains(normalizedQuery));

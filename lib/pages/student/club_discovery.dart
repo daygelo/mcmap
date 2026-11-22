@@ -1,6 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../data/campus_groups.dart';
 import '../../data/clubs.dart';
+import '../../widgets/auto_rsvp_switch.dart';
+import '../../widgets/group_type_badge.dart';
 
 class FollowClubButton extends StatelessWidget {
   const FollowClubButton({
@@ -63,12 +66,16 @@ class ClubDirectoryPage extends StatefulWidget {
     required this.followedIds,
     required this.onFollow,
     required this.onOpen,
+    required this.organizations,
+    required this.onOpenOrganization,
     this.initialQuery = '',
   });
 
   final Set<String> followedIds;
   final ValueChanged<String> onFollow;
   final ValueChanged<ClubOrganization> onOpen;
+  final Map<String, CampusGroup> organizations;
+  final void Function(String id, String name) onOpenOrganization;
   final String initialQuery;
 
   @override
@@ -77,6 +84,7 @@ class ClubDirectoryPage extends StatefulWidget {
 
 class _ClubDirectoryPageState extends State<ClubDirectoryPage> {
   late final _search = TextEditingController(text: widget.initialQuery);
+  OrganizationFilter _filter = OrganizationFilter.all;
 
   @override
   void dispose() {
@@ -86,14 +94,20 @@ class _ClubDirectoryPageState extends State<ClubDirectoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final clubs = searchClubCatalog(_search.text);
+    final matches = [
+      for (final match in searchOrganizations(
+        _search.text,
+        widget.organizations.values,
+      ))
+        if (_filter.matches(match.type)) match,
+    ];
     return Scaffold(
       appBar: AppBar(title: const Text('Browse Clubs')),
       body: SafeArea(
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: SearchBar(
                 controller: _search,
                 hintText: 'Search club names or aliases',
@@ -101,14 +115,39 @@ class _ClubDirectoryPageState extends State<ClubDirectoryPage> {
                 onChanged: (_) => setState(() {}),
               ),
             ),
-            if (clubs.isEmpty)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                spacing: 8,
+                children: [
+                  for (final filter in OrganizationFilter.values)
+                    ChoiceChip(
+                      label: Text(filter.label),
+                      selected: _filter == filter,
+                      onSelected: (_) => setState(() => _filter = filter),
+                    ),
+                ],
+              ),
+            ),
+            if (matches.isEmpty)
               const Text('No organizations match your search.')
             else
               Expanded(
                 child: ListView.builder(
-                  itemCount: clubs.length,
+                  itemCount: matches.length,
                   itemBuilder: (context, index) {
-                    final club = clubs[index];
+                    final match = matches[index];
+                    if (match.group case final group?) {
+                      return OrganizationRow(
+                        group: group,
+                        following: widget.followedIds.contains(group.id),
+                        onOpen: () =>
+                            widget.onOpenOrganization(group.id, group.name),
+                        onFollow: () => widget.onFollow(group.id),
+                      );
+                    }
+                    final club = match.club!;
                     return ClubRow(
                       club: club,
                       following: widget.followedIds.contains(club.id),
@@ -135,8 +174,14 @@ class FollowingPage extends StatelessWidget {
     required this.onBrowse,
     required this.onInbox,
     required this.inboxCount,
+    required this.organizations,
+    required this.onOpenOrganization,
+    required this.autoRsvpIds,
+    required this.autoRsvpAction,
+    this.temporaryPreferences = false,
   });
 
+  final bool temporaryPreferences;
   final Set<String> followedIds;
   final Iterable<String> notificationIds;
   final ValueChanged<String> onFollow;
@@ -144,16 +189,36 @@ class FollowingPage extends StatelessWidget {
   final VoidCallback onBrowse;
   final VoidCallback onInbox;
   final int inboxCount;
+  final Map<String, CampusGroup> organizations;
+  final void Function(String id, String name) onOpenOrganization;
+  final Iterable<String> autoRsvpIds;
+  final ValueChanged<bool>? Function(String id) autoRsvpAction;
+
+  Widget _autoRsvp(String id) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: AutoRsvpSwitch(
+      value: autoRsvpIds.contains(id),
+      onChanged: autoRsvpAction(id),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final clubs = clubCatalog.where((club) => followedIds.contains(club.id));
+    final otherIds = followedIds.where((id) => !clubsById.containsKey(id));
     return Scaffold(
       appBar: AppBar(title: const Text('Following')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (temporaryPreferences) ...[
+              Text(
+                'Following and event preferences are temporary for this session.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+            ],
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -170,9 +235,9 @@ class FollowingPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            if (clubs.isEmpty)
+            if (followedIds.isEmpty)
               const Text("You're not following any clubs yet."),
-            for (final club in clubs)
+            for (final club in clubs) ...[
               ClubRow(
                 club: club,
                 following: true,
@@ -181,11 +246,90 @@ class FollowingPage extends StatelessWidget {
                 onOpen: () => onOpen(club),
                 onFollow: () => onFollow(club.id),
               ),
+              _autoRsvp(club.id),
+            ],
+            for (final id in otherIds) ...[
+              OrganizationRow(
+                group: organizations[id] ?? CampusGroup(id: id, name: id),
+                following: true,
+                showUnfollow: true,
+                onOpen: () =>
+                    onOpenOrganization(id, organizations[id]?.name ?? id),
+                onFollow: () => onFollow(id),
+              ),
+              _autoRsvp(id),
+            ],
           ],
         ),
       ),
     );
   }
+}
+
+/// A campus organization outside the club catalog.
+class OrganizationRow extends StatelessWidget {
+  const OrganizationRow({
+    super.key,
+    required this.group,
+    required this.following,
+    required this.onOpen,
+    required this.onFollow,
+    this.showUnfollow = false,
+    this.compact = false,
+  });
+
+  final CampusGroup group;
+  final bool following;
+  final VoidCallback onOpen;
+  final VoidCallback onFollow;
+  final bool showUnfollow;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    dense: compact,
+    contentPadding: compact ? EdgeInsets.zero : null,
+    leading: Icon(
+      group.type == OrganizationType.researchGroup
+          ? Icons.science_outlined
+          : Icons.account_balance_outlined,
+    ),
+    title: compact
+        ? InkWell(onTap: onOpen, child: Text(group.name))
+        : Text(group.name),
+    subtitle: group.type == null && group.handle == null
+        ? null
+        : _TypeLine(
+            type: group.type,
+            text: group.handle == null ? null : '@${group.handle}',
+          ),
+    onTap: compact ? null : onOpen,
+    trailing: FollowClubButton(
+      clubName: group.name,
+      following: following,
+      onPressed: onFollow,
+      showUnfollow: showUnfollow,
+    ),
+  );
+}
+
+/// Type badge plus an optional detail, wrapping on narrow phones.
+class _TypeLine extends StatelessWidget {
+  const _TypeLine({this.type, this.text});
+
+  final OrganizationType? type;
+  final String? text;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 8,
+    runSpacing: 4,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: [
+      if (type case final type?) GroupTypeBadge(type),
+      if (text case final text?) Text(text),
+    ],
+  );
 }
 
 class ClubRow extends StatelessWidget {
@@ -217,8 +361,9 @@ class ClubRow extends StatelessWidget {
       title: compact
           ? InkWell(onTap: onOpen, child: Text(club.name))
           : Text(club.name),
-      subtitle: Text(
-        notifications ? '${club.category} · Updates on' : club.category,
+      subtitle: _TypeLine(
+        type: club.type,
+        text: notifications ? '${club.category} · Updates on' : club.category,
       ),
       onTap: compact ? null : onOpen,
       trailing: FollowClubButton(
@@ -239,6 +384,8 @@ class ClubDetailPage extends StatelessWidget {
     required this.notifications,
     required this.onFollow,
     required this.onNotifications,
+    required this.autoRsvp,
+    required this.onAutoRsvp,
     required this.upcoming,
     required this.past,
     required this.undated,
@@ -250,6 +397,8 @@ class ClubDetailPage extends StatelessWidget {
   final bool notifications;
   final VoidCallback onFollow;
   final ValueChanged<bool> onNotifications;
+  final bool autoRsvp;
+  final ValueChanged<bool>? onAutoRsvp;
   final List<Widget> upcoming;
   final List<Widget> past;
   final List<Widget> undated;
@@ -270,7 +419,8 @@ class ClubDetailPage extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(club.name, style: text.headlineMedium),
-            Text('${club.type.label} · ${club.category}'),
+            const SizedBox(height: 6),
+            _TypeLine(type: club.type, text: club.category),
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
@@ -290,6 +440,8 @@ class ClubDetailPage extends StatelessWidget {
                 value: notifications,
                 onChanged: onNotifications,
               ),
+            if (following)
+              AutoRsvpSwitch(value: autoRsvp, onChanged: onAutoRsvp),
             const SizedBox(height: 20),
             if (upcoming.isEmpty) ...[
               Text('Upcoming events', style: text.titleLarge),

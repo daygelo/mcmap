@@ -35,7 +35,8 @@ class LocalRsvps {
     UserProfile profile, {
     required DateTime now,
   }) {
-    final enabledAt = profile.memberships[event.clubId]?.autoRsvpEnabledAt;
+    if (!profile.followedClubIds.contains(event.clubId)) return;
+    final enabledAt = profile.clubAutoRsvpOptIns[event.clubId];
     final publishedAt = event.publishedAt;
     final startsAt = event.startsAt;
     if (enabledAt == null ||

@@ -6,29 +6,31 @@ import '../data/clubs.dart';
 class ClubPickerPage extends StatefulWidget {
   const ClubPickerPage({
     super.key,
-    this.initialSelection = const {},
-    this.onboarding = false,
+    this.academicIds = const {},
+    this.initialSelection,
   });
 
-  final Set<String> initialSelection;
-  final bool onboarding;
+  final Set<String> academicIds;
+  final Set<String>? initialSelection;
 
   @override
   State<ClubPickerPage> createState() => _ClubPickerPageState();
 }
 
 class _ClubPickerPageState extends State<ClubPickerPage> {
-  late final _selected = {...widget.initialSelection};
+  late final _selected = {...(widget.initialSelection ?? widget.academicIds)};
   String _query = '';
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final matches = clubCatalog.where((club) => club.matches(_query)).toList();
+    final ordered = [
+      ...matches.where((club) => widget.academicIds.contains(club.id)),
+      ...matches.where((club) => !widget.academicIds.contains(club.id)),
+    ];
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.onboarding ? 'Step 3 of 3' : 'Edit Clubs'),
-      ),
+      appBar: AppBar(title: const Text('Step 3 of 3')),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -42,20 +44,19 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Which clubs are you a member of?',
+                          'Which groups would you like to follow?',
                           style: text.headlineMedium,
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          widget.onboarding
-                              ? "Select the McGill clubs you're part of. You can skip this step and update your clubs later."
-                              : 'Add or remove your self-reported memberships.',
+                        const Text(
+                          'Follow McGill clubs, departments, and organizations to see their events. You can always change this later.',
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Selections are self-reported and do not enroll you in an organization.',
-                          style: text.bodySmall,
-                        ),
+                        if (widget.academicIds.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Your student associations are preselected. You can unselect any of them.',
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         SearchBar(
                           hintText: 'Search clubs by name or alias',
@@ -81,13 +82,17 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
                     ),
                   ),
                 SliverList.builder(
-                  itemCount: matches.length,
+                  itemCount: ordered.length,
                   itemBuilder: (context, index) {
-                    final club = matches[index];
+                    final club = ordered[index];
                     return CheckboxListTile(
                       key: ValueKey(club.id),
                       title: Text(club.name),
-                      subtitle: Text('${club.type.label} · ${club.category}'),
+                      subtitle: Text(
+                        widget.academicIds.contains(club.id)
+                            ? 'Student association · ${club.category}'
+                            : '${club.type.label} · ${club.category}',
+                      ),
                       value: _selected.contains(club.id),
                       onChanged: (selected) => setState(() {
                         if (selected == true) {
@@ -112,17 +117,20 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
             spacing: 12,
             runSpacing: 8,
             children: [
-              if (widget.onboarding)
-                OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(const <String>{}),
-                  child: const Text('Skip for now'),
+              OutlinedButton(
+                onPressed: () =>
+                    Navigator.of(context)
+                        .pop(_selected.intersection(widget.academicIds)),
+                child: Text(
+                  widget.academicIds.isEmpty
+                      ? 'Skip for now'
+                      : 'Skip optional groups',
                 ),
+              ),
               FilledButton(
-                onPressed: widget.onboarding && _selected.isEmpty
-                    ? null
-                    : () =>
-                          Navigator.of(context).pop(Set<String>.of(_selected)),
-                child: Text(widget.onboarding ? 'Continue' : 'Save Clubs'),
+                onPressed: () =>
+                    Navigator.of(context).pop(Set<String>.of(_selected)),
+                child: const Text('Continue'),
               ),
             ],
           ),

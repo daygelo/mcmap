@@ -1,3 +1,5 @@
+import '../data/clubs.dart';
+
 /// An event shown in the student feed. Sample events have no publication data.
 class ClubEvent {
   const ClubEvent(
@@ -9,10 +11,13 @@ class ClubEvent {
     this.isFrosh = false,
     this.clubId,
     this.publishedAt,
+    this.createdAt,
     this.startsAt,
+    this.endsAt,
     this.description,
     this.synopsis,
     this.clubAvatarUrl,
+    this.clubType,
     this.latitude,
     this.longitude,
     this.tags = const [],
@@ -28,16 +33,22 @@ class ClubEvent {
   final bool isFrosh;
   final String? clubId;
   final DateTime? publishedAt;
+
+  /// When the event was created, independent of its scheduled start.
+  final DateTime? createdAt;
   final DateTime? startsAt;
+  final DateTime? endsAt;
   final String? description;
 
-  /// 1–2 sentence AI-generated TL;DR of [description], shown on feed cards
-  /// with an "AI Summary" label. Generated server-side when the event is
+  /// 1–2 sentence AI-generated TL;DR of [description], shown on feed cards. Generated server-side when the event is
   /// published (TODO(ai): wire up the summarizer); null until then.
   final String? synopsis;
 
   /// The hosting group's picture (`groups.avatar_url`).
   final String? clubAvatarUrl;
+
+  /// The hosting group's type (`groups.type`), for groups outside the catalog.
+  final OrganizationType? clubType;
 
   /// Venue coordinates for the RSVP map.
   final double? latitude;
@@ -64,5 +75,7 @@ class ClubEvent {
   ].any((value) => value.toLowerCase().contains(query));
 
   bool matches(String query) =>
-      matchesDetails(query) || club.toLowerCase().contains(query);
+      matchesDetails(query) ||
+      club.toLowerCase().contains(query) ||
+      tags.any((tag) => tag.toLowerCase() == query);
 }

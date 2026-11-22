@@ -23,7 +23,7 @@ class StudentProfile {
     this.handle,
   });
 
-  /// "@handle" under the name. Null for the offline demo profile.
+  /// Account handle. Null for the offline demo profile.
   final String? handle;
 
   final String name;
@@ -239,10 +239,8 @@ class ProfileHeader extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(profile.name, style: text.titleLarge),
-            Text(
-              profile.handle == null ? 'Sample profile' : '@${profile.handle}',
-              style: text.bodySmall,
-            ),
+            if (profile.handle == null)
+              Text('Sample profile', style: text.bodySmall),
             const SizedBox(height: 4),
             Text('${profile.major} · ${profile.year}'),
             Text(profile.faculty, style: text.bodySmall),

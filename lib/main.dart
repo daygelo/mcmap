@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox;
 import 'package:material_ui/material_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,9 +19,17 @@ const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
   'SUPABASE_PUBLISHABLE_KEY',
 );
+const _mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (_mapboxToken.isNotEmpty &&
+      (kIsWeb ||
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS)) {
+    mapbox.MapboxOptions.setAccessToken(_mapboxToken);
+  }
 
   McMapBackend? backend;
   if (_supabaseUrl.isNotEmpty && _supabasePublishableKey.isNotEmpty) {
@@ -140,7 +150,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
         final account = snapshot.data;
-        if (account == null) {
+        if (account == null || account.id != _user?.id) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );

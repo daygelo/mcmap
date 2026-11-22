@@ -15,7 +15,9 @@ import 'package:mcmap/data/academics.dart';
 import 'package:mcmap/data/campus_groups.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/main.dart';
+import 'package:mcmap/models/app_notification.dart';
 import 'package:mcmap/models/club_event.dart';
+import 'package:mcmap/models/friend_rsvps.dart';
 import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/event_details_page.dart';
@@ -183,6 +185,50 @@ class FakeBackend implements McMapBackend {
 
   @override
   Future<Map<String, StudentVisibility>> fetchMyRsvps() async => {};
+
+  Map<String, FriendRsvps> friendRsvps = const {};
+  int friendRsvpLoads = 0;
+
+  @override
+  Future<Map<String, FriendRsvps>> fetchFriendRsvps() async {
+    friendRsvpLoads++;
+    return friendRsvps;
+  }
+
+  @override
+  Future<ClubEvent?> fetchEvent(String id) async =>
+      unlistedEvents.where((event) => event.id == id).firstOrNull;
+
+  /// Posted after the feed loaded.
+  final unlistedEvents = <ClubEvent>[];
+  var notifications = <AppNotification>[];
+  bool failNotifications = false;
+  bool failMarkRead = false;
+  int notificationRefreshes = 0;
+  final readCalls = <String?>[];
+  final notificationChanges = StreamController<void>.broadcast();
+
+  @override
+  Future<List<AppNotification>> fetchNotifications() async {
+    if (failNotifications) throw Exception('offline');
+    return [...notifications];
+  }
+
+  @override
+  Future<void> refreshNotifications() async => notificationRefreshes++;
+
+  @override
+  Future<void> markNotificationsRead({String? id}) async {
+    readCalls.add(id);
+    if (failMarkRead) throw Exception('offline');
+    notifications = [
+      for (final item in notifications)
+        id == null || item.id == id ? item.asRead() : item,
+    ];
+  }
+
+  @override
+  Stream<void> watchNotifications() => notificationChanges.stream;
 
   @override
   Future<void> setRsvp(String eventId, StudentVisibility? visibility) async {

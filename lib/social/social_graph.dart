@@ -107,6 +107,9 @@ class SocialGraph extends ChangeNotifier {
   /// Called when a server request fails (e.g. to show a snackbar).
   void Function(Object error)? onError;
 
+  /// Called when the server has saved a change to your connections.
+  VoidCallback? onConnectionsSaved;
+
   String? _lastRemoteQuery;
   Timer? _searchDebounce;
   bool _disposed = false;
@@ -146,6 +149,7 @@ class SocialGraph extends ChangeNotifier {
           (status) {
             _status[student.handle] = status;
             _notify();
+            if (!_disposed) onConnectionsSaved?.call();
           },
           onError: (Object error) {
             _restore(student, previous);
@@ -161,10 +165,17 @@ class SocialGraph extends ChangeNotifier {
     notifyListeners();
     final id = student.id;
     if (backend == null || id == null) return;
-    backend!.removeMcGillian(id).catchError((Object error) {
-      _restore(student, previous);
-      onError?.call(error);
-    });
+    backend!
+        .removeMcGillian(id)
+        .then(
+          (_) {
+            if (!_disposed) onConnectionsSaved?.call();
+          },
+          onError: (Object error) {
+            _restore(student, previous);
+            onError?.call(error);
+          },
+        );
   }
 
   /// People you're connected to: your McGillians.

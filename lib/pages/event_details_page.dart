@@ -1,8 +1,10 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../models/club_event.dart';
+import '../models/friend_rsvps.dart';
 import '../theme/app_theme.dart';
 import '../widgets/event_bits.dart';
+import '../widgets/friend_rsvp_pill.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/initials_avatar.dart';
 
@@ -17,6 +19,7 @@ class EventDetailsPage extends StatelessWidget {
     required this.onRsvp,
     this.onOpenClub,
     this.recommended = false,
+    this.friendRsvps = FriendRsvps.none,
   });
 
   final ClubEvent event;
@@ -28,6 +31,9 @@ class EventDetailsPage extends StatelessWidget {
   /// Frosh event shown to a Froshie.
   final bool recommended;
 
+  /// Your McGillians going.
+  final FriendRsvps friendRsvps;
+
   static String routeFor(String id) => '/events/$id';
 
   @override
@@ -35,6 +41,7 @@ class EventDetailsPage extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final description = event.description?.trim();
     final schedule = formatEventSchedule(context, event);
+    final deadline = formatRsvpDeadline(context, event, DateTime.now());
 
     return Scaffold(
       appBar: AppBar(title: const Text('Event details')),
@@ -87,6 +94,8 @@ class EventDetailsPage extends StatelessWidget {
                   _InfoRow(icon: Icons.schedule_rounded, label: schedule),
                 if (event.location.isNotEmpty)
                   _InfoRow(icon: Icons.place_outlined, label: event.location),
+                if (deadline != null)
+                  _InfoRow(icon: Icons.timer_outlined, label: deadline),
                 if (event.cancelled)
                   Text(
                     'This event was cancelled.',
@@ -95,6 +104,13 @@ class EventDetailsPage extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                if (friendRsvps.count > 0) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FriendRsvpPill(friendRsvps),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 if (isGoing)
                   OutlinedButton(

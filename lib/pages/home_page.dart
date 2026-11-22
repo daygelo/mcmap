@@ -27,6 +27,7 @@ import '../social/social_graph.dart';
 import '../widgets/event_bits.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/initials_avatar.dart';
+import 'map_page.dart';
 
 /// Quick filters under the search bar.
 enum _SearchScope {
@@ -718,7 +719,7 @@ class _HomePageState extends State<HomePage> {
                 ],
               ],
             ),
-            const Center(child: Text('Campus map is coming soon.')),
+            const McGillMapPage(),
             ListView(
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),

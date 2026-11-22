@@ -39,6 +39,7 @@ dependencies:
 
   # Supabase auth, database and storage
   supabase_flutter: ^2.18.3
+  mapbox_maps_flutter: ^3.35.2
 
 dev_dependencies:
   flutter_test:

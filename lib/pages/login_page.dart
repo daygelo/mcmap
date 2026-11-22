@@ -1,6 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../widgets/auth_scaffold.dart';
+
 bool isMcGillEmail(String email) {
   final normalized = email.trim().toLowerCase();
   final parts = normalized.split('@');
@@ -78,102 +80,55 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    return AuthScaffold(
+      icon: Icons.map_rounded,
+      title: 'Welcome to McMap',
+      subtitle: 'Enter your McGill email to continue.',
 
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [colorScheme.primaryContainer, colorScheme.surface],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(28),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Icon(
-                            Icons.map_rounded,
-                            size: 56,
-                            color: colorScheme.primary,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Welcome to McMap',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.headlineMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Enter your McGill email to continue.',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          const SizedBox(height: 28),
-                          TextFormField(
-                            key: const Key('email-field'),
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.email],
-                            onFieldSubmitted: (_) => _submit(),
-                            decoration: const InputDecoration(
-                              labelText: 'McGill email',
-                              hintText: 'name@mail.mcgill.ca',
-                              prefixIcon: Icon(Icons.email_outlined),
-                              border: OutlineInputBorder(),
-                            ),
-                            validator: (value) {
-                              final email = value?.trim() ?? '';
-                              if (email.isEmpty) {
-                                return 'Enter your McGill email';
-                              }
-                              if (!isMcGillEmail(email)) {
-                                return 'Use an email ending in @mcgill.ca or a McGill subdomain';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: _isLoading ? null : _submit,
-                            icon: _isLoading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.arrow_forward_rounded),
-                            label: Text(_isLoading ? 'Checking…' : 'Continue'),
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size.fromHeight(52),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+      children: [
+        Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                key: const Key('email-field'),
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.email],
+                onFieldSubmitted: (_) => _submit(),
+                decoration: const InputDecoration(
+                  labelText: 'McGill email',
+                  hintText: 'name@mail.mcgill.ca',
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+                validator: (value) {
+                  final email = value?.trim() ?? '';
+                  if (email.isEmpty) {
+                    return 'Enter your McGill email';
+                  }
+                  if (!isMcGillEmail(email)) {
+                    return 'Use an email ending in @mcgill.ca or a McGill subdomain';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _isLoading ? null : _submit,
+                icon: _isLoading
+                    ? const ButtonSpinner()
+                    : const Icon(Icons.arrow_forward_rounded),
+                label: Text(_isLoading ? 'Checking…' : 'Continue'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
                 ),
               ),
-            ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }

@@ -9,9 +9,12 @@ import '../backend/organizer_backend.dart';
 import '../data/campus_groups.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
+import '../models/app_notification.dart';
 import '../models/club_event.dart';
+import '../models/friend_rsvps.dart';
 import '../models/student_visibility.dart';
 import '../services/local_rsvps.dart';
+import '../services/notification_center.dart';
 import 'all_events_page.dart';
 import 'create_event_page.dart';
 import 'event_details_page.dart';
@@ -29,10 +32,13 @@ import 'student/student_profile.dart';
 import '../social/mcgillian_widgets.dart';
 import '../social/social_graph.dart';
 import '../widgets/event_bits.dart';
+import '../widgets/friend_rsvp_pill.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/group_type_badge.dart';
 import '../widgets/initials_avatar.dart';
 import '../widgets/mcmap_logo.dart';
+import '../widgets/notification_bell.dart';
+import '../widgets/notifications_drawer.dart';
 
 /// Quick filters under the search bar.
 enum _SearchScope {
@@ -145,8 +151,16 @@ class _HomePageState extends State<HomePage> {
     final backend? => SocialGraph.remote(backend),
     null => SocialGraph(),
   };
+  late final NotificationCenter _notifications = switch (widget.backend) {
+    final backend? => NotificationCenter.remote(backend),
+    null => NotificationCenter.local(_sampleNotifications()),
+  };
+  Map<String, FriendRsvps> _friendRsvps = const {};
+  int _friendRsvpLoads = 0;
+  late final AppLifecycleListener _lifecycle;
   final _homeScroll = ScrollController();
   final _suggestedEventsHeading = GlobalKey();
+  final _scaffold = GlobalKey<ScaffoldState>();
   final _homeSearch = TextEditingController();
   final _searchFocus = FocusNode();
   String _query = '';
@@ -364,9 +378,20 @@ class _HomePageState extends State<HomePage> {
       _showError("Couldn't update your McGillians.");
     };
     _social.addListener(_onSocialChanged);
+    _social.onConnectionsSaved = _loadFriendRsvps;
+    _notifications.onSaveFailed = () =>
+        _showError("Couldn't mark that as read. Try again.");
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        unawaited(_notifications.refresh());
+        unawaited(_loadFriendRsvps());
+      },
+    );
     _listenForPublications();
     if (widget.backend case final backend?) {
       unawaited(_loadFromServer());
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.start());
       _organizationFollowsLoad = _loadOrganizationFollows(backend);
       unawaited(_loadOrganizations(backend));
     }
@@ -422,6 +447,55 @@ class _HomePageState extends State<HomePage> {
   /// Search results for McGillians arrive asynchronously.
   void _onSocialChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadFriendRsvps() async {
+    final backend = widget.backend;
+    if (backend == null) return;
+    final load = ++_friendRsvpLoads;
+    try {
+      final rsvps = await backend.fetchFriendRsvps();
+      if (!mounted || load != _friendRsvpLoads) return;
+      _changeClubState(() => _friendRsvps = rsvps);
+    } catch (_) {
+      // Events are still useful without it; it loads again on return.
+    }
+  }
+
+  /// Only for events you could still go to.
+  FriendRsvps _friendRsvpsFor(ClubEvent event) {
+    if (event.cancelled || event.startsAt?.isAfter(DateTime.now()) == false) {
+      return FriendRsvps.none;
+    }
+    if (widget.backend != null) {
+      return _friendRsvps[event.id] ?? FriendRsvps.none;
+    }
+    final going = [
+      for (final student in _social.connections)
+        if (_sampleFriendRsvps[event.id]?.contains(student.handle) ?? false)
+          RsvpFriend(name: student.name, avatarUrl: student.avatarUrl),
+    ];
+    return FriendRsvps(count: going.length, friends: going.take(3).toList());
+  }
+
+  Future<void> _openNotification(AppNotification notification) async {
+    _notifications.markRead(notification);
+    _scaffold.currentState?.closeEndDrawer();
+    var event = _events[notification.eventId];
+    if (event == null && widget.backend != null) {
+      // Posted after the feed loaded.
+      try {
+        event = await widget.backend!.fetchEvent(notification.eventId);
+      } catch (_) {
+        return _showError("Couldn't open that event. Try again.");
+      }
+      if (!mounted) return;
+      if (event case final loaded?) {
+        _changeClubState(() => _events[loaded.id] = loaded);
+      }
+    }
+    if (event == null) return _showError('That event is no longer available.');
+    _openEvent(event);
   }
 
   Future<void> _loadFromServer() async {
@@ -522,6 +596,18 @@ class _HomePageState extends State<HomePage> {
             !publishedAt.isAfter(now) &&
             (event.startsAt?.isAfter(now) ?? true)) {
           _clubUpdates.putIfAbsent(event.id, () => event);
+          _notifications.add(
+            AppNotification(
+              id: 'new-${event.id}',
+              type: AppNotificationType.newFollowedEvent,
+              eventId: event.id,
+              groupName: event.club,
+              groupAvatarUrl: event.clubAvatarUrl,
+              title: 'New Event from ${event.club}',
+              body: '${event.club} just posted: ${event.title}',
+              createdAt: now,
+            ),
+          );
         }
         _events[event.id] = event;
         _rsvps.onPublished(event, _clubProfile, now: now);
@@ -538,6 +624,8 @@ class _HomePageState extends State<HomePage> {
     _searchFocus.dispose();
     _clubRevision.dispose();
     _rsvpVisibility.dispose();
+    _lifecycle.dispose();
+    _notifications.dispose();
     _social
       ..removeListener(_onSocialChanged)
       ..dispose();
@@ -671,6 +759,7 @@ class _HomePageState extends State<HomePage> {
       recommended: current.isFrosh && _profile.isFroshie,
       onRsvp: () => _toggleRsvp(current),
       onOpenClub: current.club.isEmpty ? null : () => _openOrganizer(current),
+      friendRsvps: _friendRsvpsFor(current),
     );
   }, route: EventDetailsPage.routeFor(event.id));
 
@@ -690,6 +779,7 @@ class _HomePageState extends State<HomePage> {
       upcoming: event.isUpcomingAt(now),
       feedEntry: feedEntry,
       previewLabel: _query.isEmpty ? 'Next event' : 'Matching event',
+      friendRsvps: _friendRsvpsFor(event),
       onRsvp: () => _toggleRsvp(event),
       showOrganizer: !insideClub,
       onOpenDetails: () => _openEvent(event),
@@ -814,6 +904,20 @@ class _HomePageState extends State<HomePage> {
 
     final selectedIndex = _destinations.indexOf(_destination);
     return Scaffold(
+      key: _scaffold,
+      endDrawer: NotificationsDrawer(
+        center: _notifications,
+        friendRsvps: (id) => switch (_events[id]) {
+          final event? => _friendRsvpsFor(event),
+          null => FriendRsvps.none,
+        },
+        onOpen: _openNotification,
+      ),
+      // Dragging from the edge would fight with the map.
+      endDrawerEnableOpenDragGesture: false,
+      onEndDrawerChanged: (open) {
+        if (open) unawaited(_notifications.refresh());
+      },
       appBar: AppBar(
         backgroundColor: McMapColors.red,
         foregroundColor: McMapColors.white,
@@ -822,8 +926,19 @@ class _HomePageState extends State<HomePage> {
           fontSize: 26,
           fontWeight: FontWeight.w700,
         ),
-        title: const McMapWordmark(color: McMapColors.white),
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: McMapWordmark(color: McMapColors.white),
+        ),
         actions: [
+          NotificationBell(
+            center: _notifications,
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              _scaffold.currentState?.openEndDrawer();
+            },
+          ),
           IconButton(
             tooltip: 'Settings',
             onPressed: () => _openPage(
@@ -968,7 +1083,13 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             if (_hasOpenedMap)
-              const McGillMapPage()
+              McGillMapPage(
+                events: [for (final (event, _) in going) event],
+                onOpenEvent: _openEvent,
+                onOpenOrganization: (id) {
+                  if (clubsById[id] case final club?) _openClub(club);
+                },
+              )
             else
               const SizedBox.shrink(),
             if (_publishingGroups.isNotEmpty)
@@ -1167,6 +1288,40 @@ class _HomePageState extends State<HomePage> {
 }
 
 // Sample synopses stand in for the AI summarizer's output.
+/// Demo McGillians going to the sample events, by handle.
+const _sampleFriendRsvps = {
+  'sample-board-game-night': {'maya.t', 'leo.b', 'sofia.r'},
+  'sample-frosh-week-kickoff': {'sofia.r'},
+};
+
+List<AppNotification> _sampleNotifications() {
+  final now = DateTime.now();
+  return [
+    AppNotification(
+      id: 'sample-deadline',
+      type: AppNotificationType.eventDeadlineSoon,
+      eventId: 'sample-board-game-night',
+      groupName: 'Board Games Club',
+      title: 'RSVP ending soon',
+      body:
+          'RSVP deadline for Board Game Night ends soon — 3 of your '
+          'McGillians RSVPed!',
+      friendRsvpCount: 3,
+      createdAt: now.subtract(const Duration(minutes: 20)),
+    ),
+    AppNotification(
+      id: 'sample-new-event',
+      type: AppNotificationType.newFollowedEvent,
+      eventId: 'sample-photo-walk',
+      groupName: 'Photography Club',
+      title: 'New Event from Photography Club',
+      body: 'Photography Club just posted: Photo Walk',
+      createdAt: now.subtract(const Duration(days: 1)),
+      isRead: true,
+    ),
+  ];
+}
+
 const _sampleEvents = [
   ClubEvent(
     'sample-board-game-night',
@@ -1252,6 +1407,7 @@ class _EventCard extends StatelessWidget {
     required this.upcoming,
     required this.previewLabel,
     required this.showOrganizer,
+    this.friendRsvps = FriendRsvps.none,
     this.feedEntry,
     this.visibility,
     this.onOpenDetails,
@@ -1274,6 +1430,9 @@ class _EventCard extends StatelessWidget {
   /// Frosh event shown to a Froshie.
   final bool recommended;
 
+  /// Your McGillians going.
+  final FriendRsvps friendRsvps;
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -1282,6 +1441,7 @@ class _EventCard extends StatelessWidget {
     final groupType = (club ?? clubsById[event.clubId])?.type ?? event.clubType;
     final more = feedEntry?.additionalEvents ?? 0;
     final schedule = formatEventSchedule(context, event);
+    final deadline = formatRsvpDeadline(context, event, DateTime.now());
     final muted = text.bodySmall?.copyWith(color: McMapColors.slate);
 
     return Card(
@@ -1355,6 +1515,7 @@ class _EventCard extends StatelessWidget {
               const SizedBox(height: 4),
               if (schedule.isNotEmpty) Text(schedule, style: muted),
               if (event.location.isNotEmpty) Text(event.location, style: muted),
+              if (deadline != null) Text(deadline, style: muted),
               if (event.cancelled)
                 const Text('Cancelled')
               else if (event.startsAt == null)
@@ -1364,6 +1525,10 @@ class _EventCard extends StatelessWidget {
               if (event.synopsis != null || event.description != null) ...[
                 const SizedBox(height: 10),
                 EventSynopsis(event: event),
+              ],
+              if (friendRsvps.count > 0) ...[
+                const SizedBox(height: 10),
+                FriendRsvpPill(friendRsvps),
               ],
               if (visibility case final audience?)
                 Text('Going · Demo visibility: ${audience.label}'),

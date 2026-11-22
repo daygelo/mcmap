@@ -14,6 +14,7 @@ class ClubEvent {
     this.createdAt,
     this.startsAt,
     this.endsAt,
+    this.rsvpDeadline,
     this.description,
     this.synopsis,
     this.clubAvatarUrl,
@@ -38,6 +39,9 @@ class ClubEvent {
   final DateTime? createdAt;
   final DateTime? startsAt;
   final DateTime? endsAt;
+
+  /// When RSVPs close, if that's before the event starts.
+  final DateTime? rsvpDeadline;
   final String? description;
 
   /// 1–2 sentence AI-generated TL;DR of [description], shown on feed cards. Generated server-side when the event is
@@ -65,8 +69,13 @@ class ClubEvent {
   bool isUpcomingAt(DateTime now) =>
       !cancelled && (startsAt?.isAfter(now) ?? false);
 
+  DateTime? get rsvpClosesAt => rsvpDeadline ?? startsAt;
+
   bool canRsvpAt(DateTime now) =>
-      !cancelled && startsAt?.isAfter(now) != false && isListedAt(now);
+      !cancelled &&
+      rsvpClosesAt?.isAfter(now) != false &&
+      startsAt?.isAfter(now) != false &&
+      isListedAt(now);
 
   bool matchesDetails(String query) => [
     title,

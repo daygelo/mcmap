@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/academics.dart';
 import '../data/campus_groups.dart';
 import '../data/clubs.dart';
+import '../models/app_notification.dart';
 import '../models/club_event.dart';
+import '../models/friend_rsvps.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
 import '../pages/student/student_profile.dart';
@@ -377,6 +381,16 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
   }
 
   @override
+  Future<ClubEvent?> fetchEvent(String id) async {
+    final row = await client
+        .from('events')
+        .select(_eventColumns)
+        .eq('id', id)
+        .maybeSingle();
+    return row == null ? null : _event(row);
+  }
+
+  @override
   Future<List<PublishingGroup>> fetchPublishingGroups() async {
     final rows = await client
         .from('group_publishers')
@@ -444,6 +458,122 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
       });
     }
   }
+
+  @override
+  Future<Map<String, FriendRsvps>> fetchFriendRsvps() async {
+    final List<dynamic> rows;
+    try {
+      rows = await client.rpc<List<dynamic>>('friend_rsvps');
+    } on PostgrestException catch (error) {
+      if (_isMissingNotifications(error)) return const {};
+      rethrow;
+    }
+    return {
+      for (final row in rows.cast<Map<String, dynamic>>())
+        row['event_id'] as String: FriendRsvps(
+          count: (row['friend_rsvp_count'] as num).toInt(),
+          friends: [
+            for (final friend in row['friend_rsvps'] as List? ?? const [])
+              RsvpFriend(
+                name: switch ((friend['full_name'] as String?)?.trim()) {
+                  final name? when name.isNotEmpty => name,
+                  _ => 'McMap Student',
+                },
+                avatarUrl: friend['avatar_url'] as String?,
+              ),
+          ],
+        ),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+
+  static const _maxNotifications = 50;
+
+  @override
+  Future<List<AppNotification>> fetchNotifications() async {
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await client
+          .from('notifications')
+          .select('*, groups(name, avatar_url)')
+          .eq('user_id', _uid)
+          .order('created_at', ascending: false)
+          .limit(_maxNotifications);
+    } on PostgrestException catch (error) {
+      if (_isMissingNotifications(error)) return const [];
+      rethrow;
+    }
+    return [
+      for (final row in rows)
+        if (AppNotificationType.fromDb(row['type']) case final type?)
+          AppNotification(
+            id: row['id'] as String,
+            type: type,
+            eventId: row['event_id'] as String,
+            groupName: row['groups']?['name'] as String? ?? '',
+            groupAvatarUrl: row['groups']?['avatar_url'] as String?,
+            title: row['title'] as String,
+            body: row['body'] as String,
+            friendRsvpCount: (row['friend_rsvp_count'] as num).toInt(),
+            isRead: row['is_read'] == true,
+            createdAt: DateTime.parse(row['created_at'] as String),
+          ),
+    ];
+  }
+
+  @override
+  Future<void> refreshNotifications() =>
+      client.rpc<void>('refresh_my_notifications');
+
+  @override
+  Future<void> markNotificationsRead({String? id}) async {
+    final mine = client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('user_id', _uid);
+    await (id == null ? mine.eq('is_read', false) : mine.eq('id', id));
+  }
+
+  @override
+  Stream<void> watchNotifications() {
+    final uid = _uid;
+    RealtimeChannel? channel;
+    late final StreamController<void> changes;
+    changes = StreamController<void>(
+      onListen: () => channel = client
+          .channel('notifications:$uid')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'notifications',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'user_id',
+              value: uid,
+            ),
+            callback: (_) => changes.add(null),
+          )
+          // Also after reconnecting, for anything missed in between.
+          .subscribe((status, _) {
+            if (status == RealtimeSubscribeStatus.subscribed) changes.add(null);
+          }),
+      onCancel: () async {
+        if (channel case final open?) await client.removeChannel(open);
+      },
+    );
+    return changes.stream;
+  }
+
+  /// The notifications migration hasn't been run on this database.
+  bool _isMissingNotifications(PostgrestException error) =>
+      switch (error.code) {
+        'PGRST202' => error.message.contains('public.friend_rsvps'),
+        'PGRST205' => error.message.contains("'public.notifications'"),
+        _ => false,
+      };
 
   // -------------------------------------------------------------------------
   // McGillians
@@ -552,6 +682,7 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
       createdAt: time('created_at'),
       startsAt: time('starts_at'),
       endsAt: time('ends_at'),
+      rsvpDeadline: time('rsvp_deadline'),
       description: row['full_description'] as String?,
       synopsis: row['ai_synopsis'] as String?,
       latitude: number('latitude'),

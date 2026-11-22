@@ -33,6 +33,9 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      the first seed's SSMU, PGSS, EUS and MUS into their catalog groups, moving
      events, RSVPs, publishers and follows. Running an older `seed.sql`
      afterwards would add the duplicates back.
+   - `supabase/migrations/20261122110000_notifications.sql`: adds
+     `events.rsvp_deadline`, friend RSVP counts and `notifications`. Run it
+     last; see [Notifications](#notifications).
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
@@ -73,6 +76,23 @@ flutter run -d chrome \
 ```
 
 Never use or commit a Supabase service-role key. The publishable/anon key is intended for client applications.
+
+## Campus map
+
+The Map tab needs `MAPBOX_TOKEN` (`flutter run --dart-define-from-file=.env`).
+Camera limits are in `lib/data/campus_map.dart`.
+
+Highlighted buildings and the offices and lounges inside them are in
+`lib/data/campus_buildings.dart`. Every space records the page its details
+came from; leave a room out rather than guess. To add a building, add it there
+and to `WAYS` in `tool/build_campus_shapes.py` (its OpenStreetMap way id), then
+run that script to regenerate `lib/data/campus_building_shapes.dart`. Shapes
+are the surveyed roofs in Montréal's 3D building model (CC BY 4.0), divided
+along © OpenStreetMap outlines (ODbL), with ground level from Natural Resources
+Canada's HRDEM (Open Government Licence - Canada). The map key credits them.
+
+Mapbox reports every building along the line of sight, so `SightLine` works out
+whether a tapped building is hidden behind another one.
 
 ## Development
 
@@ -184,6 +204,35 @@ and keeps editable presentation fields, including image bytes, in Gabby's
 interests from the presentation. Friend requests and connections remain in
 `SocialGraph` and are separate from follows. The original profile statistics
 remain in place, with the organization Following count below the profile header.
+
+## Notifications
+
+The bell in the app bar lists `public.notifications`, one per student, kind and
+event. Until the migration is run the bell stays empty and event cards show no
+friend counts.
+
+- **New events.** A trigger on `events` notifies everyone following the group
+  (`profile_organization_follows`) except the organizer. Scheduled publications
+  are announced once they become visible.
+- **Deadlines.** `generate_ending_soon_notifications()` reminds followers who
+  haven't RSVPed when `coalesce(rsvp_deadline, starts_at)` is within 24 hours.
+  The migration schedules it every 15 minutes if `pg_cron` is available. The app
+  also calls `refresh_my_notifications()`, which covers only the caller, on
+  load, on resume and when the bell is opened.
+- **Live updates** use Supabase Realtime. The migration adds the table to the
+  `supabase_realtime` publication.
+
+Friend counts (`friend_rsvps()`) include McGillians the student follows whose
+RSVP is visible to **Friends** or **Public**. RSVPs are private by default, and
+private ones never count. `publish_event` does not set `rsvp_deadline` yet, so
+RSVPs close at the start time unless a deadline is set in the database.
+
+With the migrations applied to a local Supabase instance:
+
+```bash
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/notifications.sql
+```
 
 ## Event publishing
 

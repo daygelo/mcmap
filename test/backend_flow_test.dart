@@ -20,6 +20,7 @@ import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/event_details_page.dart';
 import 'package:mcmap/pages/home_page.dart';
+import 'package:mcmap/pages/map_page.dart';
 import 'package:mcmap/pages/login_page.dart';
 import 'package:mcmap/pages/onboarding/interests_page.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
@@ -501,9 +502,19 @@ void main() {
   testWidgets('students have Home, Map and Profile navigation', (tester) async {
     await _pumpHome(tester);
     expect(find.text('Create'), findsNothing);
+    expect(find.byType(McGillMapPage), findsNothing);
     await tester.tap(find.text('Map'));
     await tester.pumpAndSettle();
-    expect(find.text('Campus map is coming soon.'), findsOneWidget);
+    expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
+    expect(find.text('Map unavailable'), findsOneWidget);
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.my_location_rounded),
+          )
+          .onPressed,
+      isNull,
+    );
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Your profile'), findsOneWidget);
@@ -528,6 +539,9 @@ void main() {
       ),
       ['Home', 'Map', 'Create', 'Profile'],
     );
+    await tester.tap(find.text('Map'));
+    await tester.pumpAndSettle();
+    expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
 
     await tester.tap(find.text('Create'));
     await tester.pumpAndSettle();

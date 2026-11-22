@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:mcmap/main.dart';
 import 'package:mcmap/pages/home_page.dart';
+import 'package:mcmap/pages/map_page.dart';
 import 'package:mcmap/pages/student/suggested_clubs.dart';
 import 'package:mcmap/widgets/mcmap_logo.dart';
 import 'package:mcmap/theme/app_theme.dart';
@@ -391,10 +392,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Map'));
       await tester.pumpAndSettle();
-      expect(
-        find.text('Campus map is coming soon.').hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
       await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
       expect(

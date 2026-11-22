@@ -15,6 +15,7 @@ import '../services/local_rsvps.dart';
 import 'all_events_page.dart';
 import 'create_event_page.dart';
 import 'event_details_page.dart';
+import 'map_page.dart';
 import 'organization_page.dart';
 import 'student/club_discovery.dart';
 import 'student/edit_profile_page.dart';
@@ -147,6 +148,7 @@ class _HomePageState extends State<HomePage> {
   _EventDiscovery _discovery = _EventDiscovery.forYou;
   _SearchScope _scope = _SearchScope.all;
   _Destination _destination = _Destination.home;
+  bool _hasOpenedMap = false;
   List<PublishingGroup> _publishingGroups = const [];
   final _publishedDuringLoad = <String, ClubEvent>{};
 
@@ -931,7 +933,10 @@ class _HomePageState extends State<HomePage> {
                 ],
               ],
             ),
-            const Center(child: Text('Campus map is coming soon.')),
+            if (_hasOpenedMap)
+              const McGillMapPage()
+            else
+              const SizedBox.shrink(),
             if (_publishingGroups.isNotEmpty)
               CreateEventPage(
                 backend: widget.backend!,
@@ -1098,7 +1103,10 @@ class _HomePageState extends State<HomePage> {
       }
       return;
     }
-    setState(() => _destination = destination);
+    setState(() {
+      _destination = destination;
+      if (destination == _Destination.map) _hasOpenedMap = true;
+    });
   }
 }
 

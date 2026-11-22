@@ -13,6 +13,7 @@ import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/all_events_page.dart';
 import 'package:mcmap/pages/event_details_page.dart';
 import 'package:mcmap/pages/home_page.dart';
+import 'package:mcmap/pages/map_page.dart';
 import 'package:mcmap/pages/student/club_discovery.dart';
 import 'package:mcmap/pages/student/suggested_clubs.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
@@ -800,10 +801,7 @@ void main() {
       await _back(tester);
 
       await _tapText(tester, 'Map');
-      expect(
-        find.text('Campus map is coming soon.').hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
       await _tapText(tester, 'Home');
       await _tapText(tester, 'See all clubs');
       await _search(tester, 'board game');

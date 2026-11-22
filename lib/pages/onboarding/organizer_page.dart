@@ -156,7 +156,7 @@ class _OrganizerPageState extends State<OrganizerPage> {
     _applicationId = id;
     _code.clear();
     _step = _Step.verify;
-    _notice = 'Code sent to ${details.email}. It expires in 10 minutes.';
+    _notice = 'Code requested for ${details.email}. Check your inbox or spam folder. It expires in 10 minutes.';
   });
 
   void _sendFromForm() {

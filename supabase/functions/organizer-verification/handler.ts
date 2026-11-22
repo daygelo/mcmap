@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.119.2";
+import type { VerificationEmailSender } from "./resend.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -54,7 +55,7 @@ async function hashCode(
 
 export async function handleOrganizerRequest(
   request: Request,
-  sendEmail: ((recipient: string, code: string) => Promise<void>) | null,
+  sendEmail: VerificationEmailSender | null,
 ): Promise<Response> {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: cors });
@@ -88,6 +89,9 @@ export async function handleOrganizerRequest(
       publicKey,
       options,
     ).auth.getUser(token);
+    if (authError && (authError.status == null || authError.status >= 500)) {
+      return reply("service_unavailable", 503);
+    }
     if (authError || !user || !user.email_confirmed_at) {
       return reply("sign_in_required", 401);
     }
@@ -123,13 +127,11 @@ export async function handleOrganizerRequest(
     }
     const email = body.email.trim().toLowerCase();
     const name = body.full_name.trim();
-    if (
-      email.length > 254 || !emailPattern.test(email) || !name ||
-      name.length > 120
-    ) {
-      return reply("invalid_details");
+    if (email.length > 254 || !emailPattern.test(email)) {
+      return reply("invalid_email", 400);
     }
-    if (!sendEmail) return reply("service_unavailable", 503);
+    if (!name || name.length > 120) return reply("invalid_details", 400);
+    if (!sendEmail) return reply("email_unavailable", 503);
 
     const code = generateCode();
     const { data, error } = await server.rpc("organizer_reserve_code", {
@@ -142,13 +144,16 @@ export async function handleOrganizerRequest(
     });
     if (error) return reply("service_unavailable", 503);
     if (data.status !== "code_sent") return reply(data.status);
+    if (typeof data.id !== "string" || !uuid.test(data.id)) {
+      return reply("service_unavailable", 503);
+    }
 
     try {
-      await sendEmail(email, code);
-      return reply("code_sent", 200, data.id);
+      const delivery = await sendEmail(email, code);
+      if (delivery === "accepted") return reply("code_sent", 200, data.id);
+      return reply(delivery, delivery === "email_rate_limited" ? 429 : 503);
     } catch {
-      // Do not log or return provider errors, which can contain message data.
-      return reply("delivery_failed", 200, data.id);
+      return reply("email_unavailable", 503);
     }
   } catch {
     return reply("service_unavailable", 503);

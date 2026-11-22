@@ -765,6 +765,48 @@ void main() {
     },
   );
 
+  test(
+    'executive verification gives safe and distinct delivery errors',
+    () async {
+      const details = (
+        groupId: 'group-uuid',
+        fullName: 'Faculty Staff',
+        email: 'executive@example.org',
+        role: ExecutiveRole.facultyRepresentative,
+      );
+      http.Response Function() reply = () => _jsonResponse({});
+      final backend = await _supabaseFollowing(
+        () => throw StateError('Unexpected request'),
+        onRequest: (_) => reply(),
+      );
+      Future<void> expectError(String text) => expectLater(
+        backend.sendExecutiveCode(details),
+        throwsA(
+          isA<OrganizerRequestError>().having(
+            (error) => error.message,
+            'message',
+            contains(text),
+          ),
+        ),
+      );
+      for (final (httpStatus, status, message) in [
+        (404, 'NOT_FOUND', 'not set up'),
+        (401, 'sign_in_required', 'Sign in again'),
+        (503, 'email_unavailable', 'could not confirm'),
+        (429, 'email_rate_limited', 'temporarily limited'),
+        (400, 'invalid_email', 'valid executive email'),
+        (200, 'attempts_exhausted', 'Too many incorrect attempts'),
+        (200, 'code_sent', 'temporarily unavailable'),
+        (200, 'pending_review', 'temporarily unavailable'),
+      ]) {
+        reply = () => _jsonResponse({'status': status}, httpStatus);
+        await expectError(message);
+      }
+      reply = () => throw http.ClientException('private transport details');
+      await expectError('Check your connection');
+    },
+  );
+
   test('only a missing Following table matches the Supabase fallback', () {
     const schemaCache = PostgrestException(
       code: 'PGRST205',

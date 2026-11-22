@@ -283,29 +283,49 @@ After sign-in, new accounts can choose Student or Faculty / Club Executive.
 Students can also apply from **Profile → Organizer settings**. Staff can enter
 McMap without academic details and add an academic profile later if applicable.
 
-Angelo needs to apply
+The shared project needs
 [`20261122100300_organizer_onboarding.sql`](supabase/migrations/20261122100300_organizer_onboarding.sql)
-after the existing migrations, then deploy the `organizer-verification` Edge
-Function using the settings in `supabase/config.toml`. The function validates
-the signed-in user's access token with Supabase Auth. It uses the runtime's
-`SUPABASE_URL` and default publishable and secret keys, with legacy key
-fallbacks for older environments.
+and its prerequisites before deploying the `organizer-verification` Edge Function.
+Check `supabase migration list --linked` with the intended project linked.
+The Resend transport requires no additional migration.
 
-Set these secrets in the Edge Function environment:
+1. In [Resend Domains](https://resend.com/domains), add a domain or subdomain
+   you control. Add the DNS records Resend provides and wait for **Verified**.
+   Use a sender at the exact verified domain, such as
+   `McMap <verify@updates.example.com>`.
+2. In [Resend API Keys](https://resend.com/api-keys), create a key named
+   `McMap organizer verification` with **Sending access** scoped to the
+   verified domain. Copy it when Resend displays it.
+3. In the intended Supabase project's **Edge Functions → Secrets**, add
+   `RESEND_API_KEY`, `ORGANIZER_FROM_EMAIL`, and `ORGANIZER_CODE_SECRET`.
+   Use the existing code secret if already configured. For a new secret,
+   generate one with `openssl rand -hex 32`. Keep secrets out of Flutter's
+   `.env` and Git. The function uses Supabase's runtime project URL and API
+   keys automatically.
+4. Compare the project reference in Supabase with the hostname in Flutter's
+   `SUPABASE_URL`, then deploy from the repository root.
 
-- `ORGANIZER_CODE_SECRET` is a dedicated random secret of at least 32
-  characters. For example, generate it with `openssl rand -hex 32`. Rotating
-  it requires users with outstanding codes to request a new one.
-- `ORGANIZER_SES_REGION` selects an Amazon SES region with production sending
-  access and a verified sender identity.
-- `ORGANIZER_SES_ACCESS_KEY_ID` and `ORGANIZER_SES_SECRET_ACCESS_KEY` are AWS
-  IAM credentials scoped to `ses:SendEmail` for that sender identity. Set
-  `ORGANIZER_SES_SESSION_TOKEN` if the credentials include a session token.
-- `ORGANIZER_FROM_EMAIL` is the address for the verified SES sender identity.
+   ```sh
+   supabase login
+   supabase projects list
+   supabase link --project-ref YOUR_PROJECT_REF
+   supabase migration list --linked
+   supabase functions deploy organizer-verification
+   ```
 
-The function avoids logging verification requests, provider payloads, and
-provider errors. SES redacts the message body in its CloudTrail send records.
-See the [AWS SES logging documentation](https://docs.aws.amazon.com/ses/latest/dg/logging-using-cloudtrail.html).
+The function checks the signed-in user's bearer token with Supabase Auth
+before it reserves or verifies a code. Its configuration disables the gateway
+JWT check so that the handler can perform that check and return its own session
+errors. Provider credentials, provider responses, access tokens, and
+verification codes are kept out of application logs and responses.
+
+For a live smoke test, sign in to McMap using a confirmed McGill account and
+open **Faculty / Club Executive** or **Profile → Organizer settings**.
+Choose an organization and request a code at a McGill address you can access.
+Enter the eight digits within ten minutes. For an email and organization
+pair outside the allowlist, confirm that **Awaiting approval** appears and
+that the application has granted no publishing access. A reviewer can then
+approve the application and verify publishing access is scoped to that group.
 
 A trusted database operator adds reviewer account UUIDs to
 `public.organizer_administrators` and exact normalized email/group UUID pairs

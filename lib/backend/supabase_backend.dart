@@ -277,44 +277,70 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
         'Sign in again to verify your executive email.',
       );
     }
-    final Map<String, dynamic> result;
+    const networkError = OrganizerRequestError(
+      'Could not reach executive verification. Check your connection and try again.',
+    );
+    final Object? data;
     try {
-      final response = await client.functions.invoke(
-        'organizer-verification',
-        headers: {'Authorization': 'Bearer $token'},
-        body: body,
-      );
-      result = response.data as Map<String, dynamic>;
+      final response = await client.functions
+          .invoke(
+            'organizer-verification',
+            headers: {'Authorization': 'Bearer $token'},
+            body: body,
+          )
+          .timeout(const Duration(seconds: 25));
+      data = response.data;
     } on FunctionException catch (error) {
-      if (error.status == 401) {
+      if (error.status == 0) throw networkError;
+      if (error.status == 404) {
         throw const OrganizerRequestError(
-          'Sign in again to verify your executive email.',
+          'Executive verification is not set up for this McMap project. Contact McMap support.',
         );
       }
-      throw const OrganizerRequestError(
-        'Verification is unavailable. Try again later.',
-      );
+      if (error.status == 401 || error.status == 403) {
+        throw const OrganizerRequestError(
+          'Sign in again with a confirmed account to verify your executive email.',
+        );
+      }
+      final details = error.details;
+      throw _verificationError(details is Map ? details['status'] : null);
+    } on Exception {
+      throw networkError;
     }
-    final status = result['status'];
-    if (status == 'code_sent' ||
-        status == 'approved' ||
-        status == 'pending_review') {
-      return result;
+
+    if (data is Map<String, dynamic>) {
+      final status = data['status'];
+      if (body['action'] == 'send' &&
+          status == 'code_sent' &&
+          data['id'] is String &&
+          (data['id'] as String).isNotEmpty) {
+        return data;
+      }
+      if (body['action'] == 'verify' &&
+          (status == 'approved' || status == 'pending_review')) {
+        return data;
+      }
+      throw _verificationError(status);
     }
-    throw OrganizerRequestError(switch (status) {
-      'invalid_details' => 'Check the executive email and application details.',
-      'already_submitted' => 'An active application exists for this organization. Refresh to see its status.',
-      'rate_limited' => 'Sending is limited to once per minute and five times per day. Try again later.',
-      'delivery_failed' =>
-        'The code could not be emailed. Wait a minute and try again.',
-      'invalid_code' =>
-        'That code is incorrect. Check the email and try again.',
-      'expired' => 'That code has expired. Request a new code.',
-      'attempts_exhausted' =>
-        'Too many incorrect attempts. Request a new code.',
-      _ => 'Verification is unavailable. Refresh and try again.',
-    });
+    throw _verificationError(null);
   }
+
+  OrganizerRequestError _verificationError(
+    Object? status,
+  ) => OrganizerRequestError(switch (status) {
+    'sign_in_required' =>
+      'Sign in again with a confirmed account to verify your executive email.',
+    'invalid_email' => 'Enter a valid executive email address.',
+    'invalid_details' => 'Check the executive email and application details.',
+    'already_submitted' => 'An active application exists for this organization. Refresh to see its status.',
+    'rate_limited' => 'Sending is limited to once per minute and five times per day. Try again later.',
+    'email_rate_limited' => 'Email delivery is temporarily limited. Wait a minute before requesting another code.',
+    'email_unavailable' || 'delivery_failed' => 'McMap could not confirm that the code was emailed. Wait a minute and try again.',
+    'invalid_code' => 'That code is incorrect. Check the email and try again.',
+    'expired' => 'That code has expired. Request a new code.',
+    'attempts_exhausted' => 'Too many incorrect attempts. Request a new code.',
+    _ => 'Verification is temporarily unavailable. Try again later.',
+  });
 
   @override
   Future<void> requestOrganization(String name, OrganizerCategory category) =>

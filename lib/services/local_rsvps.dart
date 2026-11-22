@@ -12,10 +12,11 @@ class LocalRsvps {
 
   StudentVisibility? visibilityFor(String eventId) => _decisions[eventId];
 
-  /// Replaces everything with RSVPs loaded from the server.
+  /// Replaces every RSVP with the ones loaded from the server. Cancellations
+  /// are kept, since the server has no record of them.
   void restore(Map<String, StudentVisibility> saved) {
     _decisions
-      ..clear()
+      ..removeWhere((_, visibility) => visibility != null)
       ..addAll(saved);
   }
 

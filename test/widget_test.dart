@@ -1,9 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'package:mcmap/data/academics.dart';
 import 'package:mcmap/main.dart';
+import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/map_page.dart';
+import 'package:mcmap/pages/onboarding/interests_page.dart';
 import 'package:mcmap/pages/student/suggested_clubs.dart';
 import 'package:mcmap/widgets/mcmap_logo.dart';
 import 'package:mcmap/theme/app_theme.dart';
@@ -251,7 +254,7 @@ void main() {
       reason: 'sample profile is U0',
     );
     await tester.scrollUntilVisible(
-      find.text('Going · Demo visibility: Private'),
+      find.text('Going · Private'),
       200,
       scrollable: find.descendant(
         of: find.byType(ListView).last,
@@ -398,15 +401,10 @@ void main() {
       expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
       await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
-      expect(find.text('Going · Demo visibility: Private'), findsNothing);
-      await tester.ensureVisible(
-        find.text('Going · Demo visibility: Public').last,
-      );
+      expect(find.text('Going · Private'), findsNothing);
+      await tester.ensureVisible(find.text('Going · Public').last);
       await tester.pumpAndSettle();
-      expect(
-        find.text('Going · Demo visibility: Public').hitTestable(),
-        findsNWidgets(2),
-      );
+      expect(find.text('Going · Public').hitTestable(), findsNWidgets(2));
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       expect(selected(), StudentVisibility.public);
@@ -417,16 +415,101 @@ void main() {
         -300,
         scrollable: find
             .ancestor(
-              of: find.text('Going · Demo visibility: Public').first,
+              of: find.text('Going · Public').first,
               matching: find.byType(Scrollable),
             )
             .first,
       );
+      // Dragging past the top also refreshes; let the spinner go.
+      await tester.pumpAndSettle();
       expect(find.text('Your profile').hitTestable(), findsOneWidget);
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('signup never asks for a campus or mentions Macdonald', (
+    tester,
+  ) async {
+    await _goToAcademicInfo(tester);
+    await tester.tap(find.text('Undergraduate'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('U2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Arts'), findsOneWidget);
+    expect(find.textContaining('Agricultural'), findsNothing);
+    await tester.tap(find.text('Science'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Campus'), findsNothing);
+    expect(find.textContaining('Macdonald'), findsNothing);
+    await _pickMajor(tester, 'Biology', 'Biology');
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+
+    final search = find.byType(SearchBar);
+    for (final hidden in [
+      'Macdonald Campus Students',
+      'MCGSS',
+      'AESUS',
+      'Bioresource',
+      'Dietetics',
+      'Farm Management',
+      'Food Science',
+    ]) {
+      await tester.enterText(search, hidden);
+      await tester.pumpAndSettle();
+      expect(find.byType(CheckboxListTile), findsNothing, reason: hidden);
+    }
+    await tester.enterText(search, 'SSMU');
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckboxListTile), findsWidgets);
+  });
+
+  testWidgets('interest tiles fit small phones and large text', (tester) async {
+    for (final (width, scale) in [(320.0, 1.0), (390.0, 1.0), (360.0, 2.0)]) {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildMcMapTheme(),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(scale)),
+            child: child!,
+          ),
+          home: InterestsPage(
+            key: UniqueKey(),
+            profile: const UserProfile(
+              degreeLevel: DegreeLevel.undergraduate,
+              year: 'U1',
+              faculty: 'Science',
+              major: 'Biology',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Sports'), 200);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sports'));
+      await tester.pumpAndSettle();
+      expect(find.text('Continue · 1 selected'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: '$width at $scale');
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Sports')),
+        isSemantics(
+          label: 'Sports',
+          isButton: true,
+          isSelected: true,
+          hasSelectedState: true,
+          hasTapAction: true,
+        ),
+      );
+    }
+  });
 
   testWidgets('picking interests carries them to home', (tester) async {
     await _goToInterests(tester);

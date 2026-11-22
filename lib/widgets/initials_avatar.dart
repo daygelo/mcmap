@@ -15,9 +15,8 @@ String initialsFor(String name) {
   return words.take(2).map((w) => w.characters.first.toUpperCase()).join();
 }
 
-/// Circle with initials on the soft McGill tint. Used when a club or student
-/// has no photo yet. Text is redStrong (#C8102E), not #ED1B2F, so it passes
-/// WCAG AA on the tint at every size.
+/// Circle with initials on an accent tint that stays the same for each name.
+/// Used when a club or student has no photo yet. Passes WCAG AA at every size.
 class InitialsAvatar extends StatelessWidget {
   const InitialsAvatar({
     super.key,
@@ -40,10 +39,11 @@ class InitialsAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = McMapAccent.of(name);
     final avatar = CircleAvatar(
       radius: diameter / 2,
-      backgroundColor: McMapColors.redTint,
-      foregroundColor: McMapColors.redStrong,
+      backgroundColor: accent.tint,
+      foregroundColor: accent.deep,
       foregroundImage: image,
       onForegroundImageError: image == null ? null : (_, _) {},
       child: Text(

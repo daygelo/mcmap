@@ -29,7 +29,6 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
   /// Only asked of U1s: null = unanswered.
   bool? _firstYear;
   String? _faculty;
-  AcademicCampus? _campus;
 
   /// Free text so grad students can type a program that isn't in the list;
   /// picking a suggestion just fills this in.
@@ -91,7 +90,6 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
             year: _year,
             firstYearAtMcGill: _firstYear ?? false,
             faculty: _faculty!,
-            campus: _campus,
             major: _majorText.isEmpty ? null : _majorText,
           ),
         ),
@@ -206,25 +204,6 @@ class _AcademicInfoPageState extends State<AcademicInfoPage> {
                       key: ValueKey(_faculty),
                       controller: _major,
                       options: [undeclaredMajor, ...?majorsByFaculty[_faculty]],
-                    ),
-                  ),
-                ),
-                _Reveal(
-                  visible: _yearDone && _faculty != null,
-                  child: _Section(
-                    title: 'Campus (optional)',
-                    child: DropdownButtonFormField<AcademicCampus>(
-                      initialValue: _campus,
-                      isExpanded: true,
-                      hint: const Text('Use program campus when known'),
-                      items: [
-                        for (final campus in AcademicCampus.values)
-                          DropdownMenuItem(
-                            value: campus,
-                            child: Text(campus.label),
-                          ),
-                      ],
-                      onChanged: (campus) => setState(() => _campus = campus),
                     ),
                   ),
                 ),

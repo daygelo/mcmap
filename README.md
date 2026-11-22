@@ -34,7 +34,7 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      events, RSVPs, publishers and follows. Running an older `seed.sql`
      afterwards would add the duplicates back.
    - Apply organizer onboarding, then the notifications, notification privacy,
-     and global RSVP privacy migrations in timestamp order.
+     global RSVP privacy, and Private-default safeguard migrations in timestamp order.
      See [Notifications and RSVP privacy](#notifications-and-rsvp-privacy).
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
@@ -91,6 +91,10 @@ are the surveyed roofs in Montréal's 3D building model (CC BY 4.0), divided
 along © OpenStreetMap outlines (ODbL), with ground level from Natural Resources
 Canada's HRDEM (Open Government Licence - Canada). The map key credits them.
 
+The basemap's greens (parks, lawns, street trees) and pale buildings are set in
+`campusBasemap` in `lib/data/campus_map.dart`. A test keeps the highlighted
+buildings and pins standing out from them.
+
 Mapbox reports every building along the line of sight, so `SightLine` works out
 whether a tapped building is hidden behind another one.
 
@@ -131,9 +135,10 @@ and on an organization's details page.
 The organization picker preselects researched student associations from
 `lib/data/academic_auto_follows.dart`. Each rule carries its catalog ID,
 eligibility, and source. The picker lets students deselect defaults or skip
-optional groups while retaining the academic selections they approved. Campus
-is an optional onboarding input. Confirmed program-campus mappings may fill
-a blank, and an uncertain or other campus leaves campus-specific defaults off.
+optional groups while retaining the academic selections they approved. Signup
+only covers downtown: it doesn't ask for a campus, and Macdonald Campus
+programs and societies (`macdonaldOrganizationIds`) aren't offered or suggested.
+Those societies stay in the directory for students who already follow them.
 
 The final choices use the same Following records as manual follows. Defaults
 run only in onboarding, so later sign-ins and profile edits never re-add an
@@ -237,6 +242,22 @@ With the migrations applied to a local Supabase instance:
 psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
   -f supabase/tests/notifications.sql -f supabase/tests/global_rsvp_privacy.sql
 ```
+
+The integration safeguard `20261122120000_public_rsvps.sql` keeps both
+database defaults Private. Run its regression test after the migrations:
+
+```bash
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/public_rsvps.sql
+```
+
+## Refreshing
+
+Home, All campus events and Profile refresh when dragged past the top or bottom
+(`lib/widgets/pull_to_refresh.dart`). Web trackpads can't scroll past the end of
+a list, so scrolling on from an end counts there. The feed stays on screen
+while refreshing. In-progress RSVP and privacy writes are protected from stale
+refresh responses.
 
 ## Event publishing
 

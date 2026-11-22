@@ -1,7 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../theme/app_theme.dart';
 import '../models/club_event.dart';
+import '../theme/app_theme.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/profile_stats.dart';
 import 'social_graph.dart';
@@ -103,10 +103,11 @@ class McGillianAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = McMapAccent.of(student.name);
     return CircleAvatar(
       radius: radius,
-      backgroundColor: McMapColors.redTint,
-      foregroundColor: McMapColors.redStrong,
+      backgroundColor: accent.tint,
+      foregroundColor: accent.deep,
       foregroundImage: switch (student.avatarUrl) {
         final url? => NetworkImage(url),
         null => null,
@@ -215,18 +216,31 @@ class _McGillianProfilePageState extends State<McGillianProfilePage> {
     } else {
       _profile = _loadProfile();
     }
+    if (widget.student case final student?) graph.loadStats(student);
     graph.attendanceRevision.addListener(_refresh);
   }
 
   Future<McGillian?> _loadProfile() async {
     final student = await graph.findProfile(widget.profileId!);
-    if (mounted && student != null) _events = _loadEvents();
+    if (mounted && student != null) {
+      _events = _loadEvents();
+      graph.loadStats(student);
+    }
     return student;
   }
 
   Future<List<ClubEvent>>? _loadEvents() {
     final id = widget.profileId ?? widget.student?.id;
-    final load = id == null ? null : graph.backend?.fetchProfileRsvps(id);
+    final demoStudent =
+        widget.student ??
+        graph.directory
+            .where((student) => student.handle == widget.profileId)
+            .firstOrNull;
+    final load = graph.backend == null && demoStudent?.isPrivate == false
+        ? graph.loadGoing?.call(demoStudent!)
+        : id == null
+        ? null
+        : graph.backend?.fetchProfileRsvps(id);
     // A fast failure can arrive before the profile body mounts its builder.
     load?.ignore();
     return load;
@@ -304,7 +318,9 @@ class _McGillianProfilePageState extends State<McGillianProfilePage> {
                                 ),
                                 stats: [
                                   ProfileStat(
-                                    value: graph.countFor(student),
+                                    value: graph.countFor(
+                                      graph.current(student),
+                                    ),
                                     label: 'McGillians',
                                   ),
                                 ],

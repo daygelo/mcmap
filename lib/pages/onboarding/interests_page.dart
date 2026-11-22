@@ -5,10 +5,12 @@ import '../../data/interests.dart';
 import '../../data/academic_auto_follows.dart';
 import '../../models/user_profile.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/interest_pin.dart';
 import '../club_picker_page.dart';
 import '../home_page.dart';
 
-/// Onboarding step 2 (optional): Instagram-style grid of interests to tap.
+/// Onboarding step 2 (optional): a grid of interests to tap, each one a pin on
+/// its own patch of map.
 ///
 /// Users can leave with zero interests. The bottom button adapts: with nothing
 /// selected it's a low-key "Skip for now"; once anything is tapped it becomes
@@ -179,82 +181,78 @@ class _InterestTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelStyle = Theme.of(context).textTheme.labelLarge;
+    final accent = interest.accent;
+    const radius = BorderRadius.all(Radius.circular(16));
     return Semantics(
       button: true,
       selected: selected,
       label: interest.name,
+      excludeSemantics: true,
+      onTap: onTap,
       child: GestureDetector(
         onTap: onTap,
-        child: AnimatedScale(
-          scale: selected ? 0.94 : 1,
-          duration: const Duration(milliseconds: 150),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    // Category colors are specific to these tiles. Darken
-                    // the label area for contrast across the whole palette.
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      stops: const [0, 0.45, 1],
-                      colors: [
-                        interest.color,
-                        Color.lerp(interest.color, McMapColors.ink, 0.25)!,
-                        Color.lerp(interest.color, McMapColors.ink, 0.75)!,
-                      ],
+        child: ClipRRect(
+          borderRadius: radius,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CustomPaint(painter: MapPatchPainter(accent)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: FittedBox(
+                        child: AnimatedSlide(
+                          // Lifts off the map when picked up.
+                          offset: Offset(0, selected ? -0.06 : 0),
+                          duration: const Duration(milliseconds: 150),
+                          child: InterestPin(interest, height: 72),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                Center(
-                  child: Icon(
-                    interest.icon,
-                    size: 44,
-                    color: McMapColors.white.withValues(alpha: 0.9),
-                  ),
-                ),
-                Positioned(
-                  left: 10,
-                  right: 10,
-                  bottom: 10,
-                  child: Text(
-                    interest.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: labelStyle?.copyWith(
-                      color: McMapColors.white,
-                      shadows: [Shadow(blurRadius: 6, color: McMapColors.ink)],
+                    const SizedBox(height: 4),
+                    Text(
+                      interest.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: selected ? accent.deep : McMapColors.ink,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-                AnimatedOpacity(
-                  opacity: selected ? 1 : 0,
+              ),
+              IgnorePointer(
+                child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: McMapColors.ink.withValues(alpha: 0.35),
-                      border: Border.all(color: McMapColors.white, width: 3),
-                      borderRadius: BorderRadius.circular(16),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: selected
+                          ? accent.deep
+                          : accent.deep.withValues(alpha: 0.18),
+                      width: selected ? 3 : 1,
                     ),
-                    alignment: Alignment.topRight,
-                    padding: const EdgeInsets.all(8),
-                    child: CircleAvatar(
-                      radius: 12,
+                    borderRadius: radius,
+                  ),
+                  alignment: Alignment.topRight,
+                  padding: const EdgeInsets.all(6),
+                  child: AnimatedOpacity(
+                    opacity: selected ? 1 : 0,
+                    duration: const Duration(milliseconds: 150),
+                    child: const CircleAvatar(
+                      radius: 11,
                       backgroundColor: McMapColors.red,
                       child: Icon(
                         Icons.check_rounded,
-                        size: 16,
+                        size: 15,
                         color: McMapColors.white,
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

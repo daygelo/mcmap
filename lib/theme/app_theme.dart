@@ -20,7 +20,7 @@ abstract final class McMapColors {
   /// surfaces (7.64:1 on [redTint]).
   static const burgundy = Color(0xFF9E0B0F);
 
-  /// Soft red tint for selected chips, selected nav item, highlight banners.
+  /// Soft red tint for the selected nav item and highlight banners.
   static const redTint = Color(0xFFFDF2F3);
 
   // Surfaces
@@ -51,6 +51,50 @@ abstract final class McMapColors {
   // Status
   static const success = Color(0xFF1E7B4F);
   static const error = burgundy;
+}
+
+/// Natural accents for everything that isn't a brand anchor: avatars, tags,
+/// choices and interests. McGill red stays for the header, the main action on
+/// a screen, navigation, unread badges and map pins.
+///
+/// Every [deep] is at least 5.0:1 on its [tint] and 5.6:1 under white.
+enum McMapAccent {
+  /// Mount Royal's pines. Selected chips, radios and switches use this one.
+  pine(Color(0xFF2F6B4F), Color(0xFFE4F0E8)),
+  moss(Color(0xFF566E28), Color(0xFFEDF2DF)),
+  spruce(Color(0xFF1F6B69), Color(0xFFDFF0EE)),
+
+  /// The St. Lawrence.
+  lake(Color(0xFF266A8A), Color(0xFFE1F0F6)),
+  sky(Color(0xFF3A62A6), Color(0xFFE6EDF9)),
+  heather(Color(0xFF6A579B), Color(0xFFEEEAF7)),
+  plum(Color(0xFF87426F), Color(0xFFF6E8F1)),
+
+  /// Brick.
+  clay(Color(0xFFA04C2B), Color(0xFFF9EAE2)),
+
+  /// Maple syrup.
+  amber(Color(0xFF86600F), Color(0xFFF8F0DA)),
+
+  /// Montréal greystone.
+  stone(Color(0xFF59606C), Color(0xFFECEEF1));
+
+  const McMapAccent(this.deep, this.tint);
+
+  /// Text, icons and solid fills.
+  final Color deep;
+
+  /// Backgrounds behind [deep].
+  final Color tint;
+
+  /// The same one every time for a given [name].
+  static McMapAccent of(String name) {
+    var hash = 7;
+    for (final unit in name.trim().toLowerCase().codeUnits) {
+      hash = (hash * 31 + unit) & 0x3FFFFFFF;
+    }
+    return values[hash % values.length];
+  }
 }
 
 /// McMap type system.
@@ -208,6 +252,13 @@ ThemeData buildMcMapTheme() {
 
   final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
 
+  final selection = WidgetStateProperty.resolveWith((states) {
+    if (states.contains(WidgetState.disabled)) return McMapColors.slateLight;
+    return states.contains(WidgetState.selected)
+        ? McMapAccent.pine.deep
+        : McMapColors.slate;
+  });
+
   return ThemeData(
     useMaterial3: true,
     colorScheme: colorScheme,
@@ -294,32 +345,42 @@ ThemeData buildMcMapTheme() {
       ),
     ),
 
-    radioTheme: RadioThemeData(
-      fillColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.disabled)) {
-          return McMapColors.slateLight;
-        }
-        if (states.contains(WidgetState.selected)) return McMapColors.red;
-        return McMapColors.slate;
-      }),
+    // Choices are pine green, so red is left for actions.
+    radioTheme: RadioThemeData(fillColor: selection),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? selection.resolve(states)
+            : Colors.transparent,
+      ),
+      checkColor: const WidgetStatePropertyAll(McMapColors.white),
+    ),
+    switchTheme: SwitchThemeData(
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) =>
+            states.contains(WidgetState.selected) &&
+                !states.contains(WidgetState.disabled)
+            ? McMapAccent.pine.deep
+            : null,
+      ),
     ),
 
-    // Category tags / filters: red tint and bright red selection marks.
+    // Category tags / filters: selected ones turn pine green.
     chipTheme: ChipThemeData(
       backgroundColor: McMapColors.white,
-      selectedColor: McMapColors.redTint,
+      selectedColor: McMapAccent.pine.tint,
       labelStyle: McMapFonts.textTheme.bodyMedium!.copyWith(
         fontWeight: FontWeight.w500,
       ),
       secondaryLabelStyle: McMapFonts.textTheme.bodyMedium!.copyWith(
-        color: McMapColors.burgundy,
+        color: McMapAccent.pine.deep,
         fontWeight: FontWeight.w600,
       ),
-      checkmarkColor: McMapColors.red,
+      checkmarkColor: McMapAccent.pine.deep,
       side: WidgetStateBorderSide.resolveWith(
         (s) => BorderSide(
           color: s.contains(WidgetState.selected)
-              ? McMapColors.red
+              ? McMapAccent.pine.deep
               : McMapColors.borderStrong,
         ),
       ),

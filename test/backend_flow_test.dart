@@ -280,6 +280,10 @@ class FakeBackend implements McMapBackend {
     return visibility;
   }
 
+  final visibilitySaves = <StudentVisibility>[];
+  int rsvpsOfLoads = 0;
+  bool failRsvpsOf = false;
+
   @override
   Future<StudentVisibility> setRsvpVisibility(
     StudentVisibility visibility,
@@ -287,6 +291,7 @@ class FakeBackend implements McMapBackend {
     privacyWrites++;
     await pendingRsvpPrivacy?.future;
     if (failRsvpPrivacy) throw Exception('offline');
+    visibilitySaves.add(visibility);
     rsvpPrivacy = visibility;
     savedRsvps.updateAll((_, _) => visibility);
     return visibility;
@@ -297,8 +302,14 @@ class FakeBackend implements McMapBackend {
       [priya, sam].where((student) => student.id == profileId).firstOrNull;
 
   @override
-  Future<List<ClubEvent>> fetchProfileRsvps(String profileId) async =>
-      visibleProfileEvents[profileId] ?? const [];
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId) async {
+    rsvpsOfLoads++;
+    if (failRsvpsOf) throw Exception('offline');
+    return (visibleProfileEvents[profileId] ?? const <ClubEvent>[])
+        .where((event) => event.isUpcomingAt(DateTime.now()))
+        .toList()
+      ..sort((a, b) => a.startsAt!.compareTo(b.startsAt!));
+  }
 
   @override
   Future<List<RsvpFriend>> fetchEventAttendees(String eventId) async =>

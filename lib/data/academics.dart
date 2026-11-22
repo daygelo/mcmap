@@ -1,18 +1,6 @@
-/// McGill faculties and a selection of undergraduate majors in each.
+/// Downtown faculties and a selection of undergraduate majors in each.
 /// Not exhaustive; edit freely.
 const Map<String, List<String>> majorsByFaculty = {
-  'Agricultural & Environmental Sciences': [
-    'Agricultural Economics',
-    'Animal Science',
-    'Bioresource Engineering',
-    'Dietetics',
-    'Environmental Biology',
-    'Food Science',
-    'Farm Management and Technology',
-    'Global Food Security',
-    'Nutrition',
-    'Plant Science',
-  ],
   'Arts': [
     'Anthropology',
     'Art History',
@@ -147,14 +135,3 @@ final List<String> academicStandings = [
   for (final level in DegreeLevel.values)
     if (!level.hasUYear) level.shortLabel,
 ];
-
-/// Optional self-reported campus used when selecting onboarding follows.
-enum AcademicCampus {
-  downtown('Downtown'),
-  macdonald('Macdonald'),
-  otherOrUnsure('Other campus or unsure');
-
-  const AcademicCampus(this.label);
-
-  final String label;
-}

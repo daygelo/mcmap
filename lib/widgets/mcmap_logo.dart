@@ -64,6 +64,19 @@ class McMapWordmark extends StatelessWidget {
   }
 }
 
+/// The logo's pin on its 64×64 grid: a round head centred on (32, 27),
+/// tapering to a point at (32, 55).
+Path mcMapPin() => Path()
+  ..moveTo(32, 55)
+  ..cubicTo(26, 46, 18, 39, 18, 27)
+  ..arcToPoint(
+    const Offset(46, 27),
+    radius: const Radius.circular(14),
+    largeArc: true,
+  )
+  ..cubicTo(46, 39, 38, 46, 32, 55)
+  ..close();
+
 class McMapLogoPainter extends CustomPainter {
   const McMapLogoPainter();
 
@@ -147,17 +160,7 @@ class McMapLogoPainter extends CustomPainter {
       Paint()..color = McMapColors.ink.withValues(alpha: 0.18),
     );
 
-    // Pin: round head, tapering to a point at (32, 55).
-    final pin = Path()
-      ..moveTo(32, 55)
-      ..cubicTo(26, 46, 18, 39, 18, 27)
-      ..arcToPoint(
-        const Offset(46, 27),
-        radius: const Radius.circular(14),
-        largeArc: true,
-      )
-      ..cubicTo(46, 39, 38, 46, 32, 55)
-      ..close();
+    final pin = mcMapPin();
     canvas.drawPath(
       pin,
       Paint.from(stroke)

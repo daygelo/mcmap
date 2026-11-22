@@ -167,3 +167,29 @@ Map<String, Object> campusPinCollection(Iterable<CampusPin> pins) => {
   'type': 'FeatureCollection',
   'features': [for (final pin in pins) pin.toFeature()],
 };
+
+/// Mapbox Standard options. The natural theme keeps Mount Royal, the lawns and
+/// the street trees green, and limestone buildings and quiet roads leave the
+/// strong colours to the highlighted buildings and the pins.
+const campusBasemap = <String, Object>{
+  'lightPreset': 'day',
+  'theme': 'default',
+  'show3dObjects': true,
+  'show3dTrees': true,
+  'colorLand': '#EFF1E9',
+  // Parks, lawns and playing fields, then the rest of the campus grounds.
+  'colorGreenspace': '#BBDEAF',
+  'colorEducation': '#DCEAD2',
+  'colorMedical': '#E8ECDF',
+  'colorCommercial': '#F0EEE5',
+  'colorIndustrial': '#ECEBE4',
+  'colorWater': '#A4D1EA',
+  'colorBuildings': '#EEEDE7',
+  'colorRoads': '#E2E0D9',
+  'colorTrunks': '#DAD6CD',
+  'colorMotorways': '#D3CEC5',
+  'showPointOfInterestLabels': false,
+  'showTransitLabels': false,
+  'showRoadLabels': true,
+  'showPlaceLabels': true,
+};

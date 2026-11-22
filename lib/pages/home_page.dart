@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
-import '../data/academics.dart';
+import '../backend/organizer_backend.dart';
 import '../data/campus_groups.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
@@ -16,6 +16,8 @@ import 'all_events_page.dart';
 import 'create_event_page.dart';
 import 'event_details_page.dart';
 import 'map_page.dart';
+import 'onboarding/academic_info_page.dart';
+import 'onboarding/organizer_page.dart';
 import 'organization_page.dart';
 import 'student/club_discovery.dart';
 import 'student/edit_profile_page.dart';
@@ -108,16 +110,8 @@ class _HomePageState extends State<HomePage> {
   final _clubRevision = ValueNotifier(0);
   StreamSubscription<ClubEvent>? _publications;
 
-  // Club relationships live in UserProfile. StudentProfile remains the
-  // editable presentation, including Gabby's local photo and standing.
-  late UserProfile _clubProfile =
-      widget.profile ??
-      const UserProfile(
-        degreeLevel: DegreeLevel.undergraduate,
-        faculty: 'Faculty of Engineering',
-        major: 'Software Engineering',
-        year: 'U0',
-      );
+  late OrganizationPreferences _clubProfile =
+      widget.profile ?? const OrganizationPreferences();
   final _rsvpVisibility = ValueNotifier(StudentVisibility.private);
   late StudentProfile _profile = switch (widget.profile) {
     final profile? => StudentProfile(
@@ -133,6 +127,17 @@ class _HomePageState extends State<HomePage> {
       bio: widget.account?.bio ?? '',
       avatarUrl: widget.account?.avatarUrl,
       handle: widget.account?.handle,
+    ),
+    null when widget.account != null => StudentProfile(
+      name: widget.account!.fullName.trim().isEmpty
+          ? 'McMap Organizer'
+          : widget.account!.fullName,
+      faculty: '',
+      major: '',
+      year: '',
+      bio: widget.account!.bio,
+      avatarUrl: widget.account!.avatarUrl,
+      handle: widget.account!.handle,
     ),
     null => const StudentProfile(),
   };
@@ -150,6 +155,8 @@ class _HomePageState extends State<HomePage> {
   _Destination _destination = _Destination.home;
   bool _hasOpenedMap = false;
   List<PublishingGroup> _publishingGroups = const [];
+  Timer? _publishingRefresh;
+  int _publishingLoadRevision = 0;
   final _publishedDuringLoad = <String, ClubEvent>{};
 
   List<_Destination> get _destinations => [
@@ -364,14 +371,39 @@ class _HomePageState extends State<HomePage> {
       unawaited(_loadOrganizations(backend));
     }
     if (widget.account != null && widget.backend != null) {
-      unawaited(_loadPublishingGroups(widget.backend!));
+      _refreshPublishingGroups();
+      if (widget.backend is OrganizerBackend) {
+        _publishingRefresh = Timer.periodic(
+          const Duration(seconds: 30),
+          (_) => _refreshPublishingGroups(),
+        );
+      }
+    }
+  }
+
+  void _refreshPublishingGroups() {
+    if (widget.backend case final backend?) {
+      unawaited(_loadPublishingGroups(backend));
     }
   }
 
   Future<void> _loadPublishingGroups(McMapBackend backend) async {
+    final revision = ++_publishingLoadRevision;
     try {
       final groups = await backend.fetchPublishingGroups();
-      if (mounted) setState(() => _publishingGroups = groups);
+      if (!mounted || revision != _publishingLoadRevision) return;
+      if (listEquals(
+        groups.map((group) => (group.id, group.name)).toList(),
+        _publishingGroups.map((group) => (group.id, group.name)).toList(),
+      )) {
+        return;
+      }
+      setState(() {
+        _publishingGroups = groups;
+        if (groups.isEmpty && _destination == _Destination.create) {
+          _destination = _Destination.profile;
+        }
+      });
     } catch (_) {
       // Discovery remains available if publisher verification fails.
     }
@@ -473,6 +505,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _listenForPublications() {
+    _publishingRefresh?.cancel();
     unawaited(_publications?.cancel());
     _publications = widget.publications?.listen((event) {
       final now = DateTime.now();
@@ -498,6 +531,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _publishingRefresh?.cancel();
     unawaited(_publications?.cancel());
     _homeScroll.dispose();
     _homeSearch.dispose();
@@ -969,6 +1003,28 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
+                if (widget.backend is OrganizerBackend &&
+                    widget.profile == null)
+                  ListTile(
+                    leading: const Icon(Icons.school_outlined),
+                    title: const Text('Add academic profile'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _openPage(context, const AcademicInfoPage()),
+                  ),
+                if (widget.backend is OrganizerBackend)
+                  ListTile(
+                    leading: const Icon(Icons.verified_user_outlined),
+                    title: const Text('Organizer settings'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _openPage(
+                      context,
+                      OrganizerPage(
+                        backend: widget.backend as OrganizerBackend,
+                        fullName: _profile.name,
+                        onPermissionsChanged: _refreshPublishingGroups,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,

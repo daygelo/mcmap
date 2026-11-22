@@ -1,7 +1,36 @@
 import '../data/academics.dart';
 
+/// Follow, notification, and Auto-RSVP preferences for any account.
+class OrganizationPreferences {
+  const OrganizationPreferences({
+    this.clubAutoRsvpOptIns = const {},
+    this.followedClubIds = const {},
+    this.clubNotificationOptIns = const {},
+  });
+
+  final Map<String, DateTime> clubAutoRsvpOptIns;
+  final Set<String> followedClubIds;
+  final Map<String, DateTime> clubNotificationOptIns;
+
+  OrganizationPreferences copyWith({
+    Map<String, DateTime>? clubAutoRsvpOptIns,
+    Set<String>? followedClubIds,
+    Map<String, DateTime>? clubNotificationOptIns,
+  }) => OrganizationPreferences(
+    clubAutoRsvpOptIns: clubAutoRsvpOptIns == null
+        ? this.clubAutoRsvpOptIns
+        : Map.unmodifiable(clubAutoRsvpOptIns),
+    followedClubIds: followedClubIds == null
+        ? this.followedClubIds
+        : Set.unmodifiable(followedClubIds),
+    clubNotificationOptIns: clubNotificationOptIns == null
+        ? this.clubNotificationOptIns
+        : Map.unmodifiable(clubNotificationOptIns),
+  );
+}
+
 /// Academic onboarding data and independently editable club preferences.
-class UserProfile {
+class UserProfile extends OrganizationPreferences {
   const UserProfile({
     required this.degreeLevel,
     required this.faculty,
@@ -10,9 +39,9 @@ class UserProfile {
     this.firstYearAtMcGill = false,
     this.major,
     this.interests = const {},
-    this.clubAutoRsvpOptIns = const {},
-    this.followedClubIds = const {},
-    this.clubNotificationOptIns = const {},
+    super.clubAutoRsvpOptIns,
+    super.followedClubIds,
+    super.clubNotificationOptIns,
   }) : assert(degreeLevel != DegreeLevel.undergraduate || year != null),
        assert(degreeLevel == DegreeLevel.exchangeOrContinuing || major != null);
 
@@ -39,18 +68,12 @@ class UserProfile {
   /// campus-wide events.
   final Set<String> interests;
 
-  /// Explicit opt-ins retained for followed organizations.
-  final Map<String, DateTime> clubAutoRsvpOptIns;
-  final Set<String> followedClubIds;
-
-  /// Enable times prevent notifications for events published before consent.
-  final Map<String, DateTime> clubNotificationOptIns;
-
   bool get hasInterests => interests.isNotEmpty;
 
   /// "U2" for undergrads, otherwise the degree level ("Master's", "Ph.D.").
   String get standing => year ?? degreeLevel.shortLabel;
 
+  @override
   UserProfile copyWith({
     Set<String>? interests,
     Map<String, DateTime>? clubAutoRsvpOptIns,

@@ -9,7 +9,7 @@ import '../models/user_profile.dart';
 import '../pages/student/student_profile.dart';
 import '../social/social_graph.dart';
 
-/// The signed-in student's row in `profiles`.
+/// The signed-in account's row in `profiles`.
 class AccountProfile {
   const AccountProfile({
     required this.id,
@@ -18,7 +18,8 @@ class AccountProfile {
     this.avatarUrl,
     this.bio = '',
     this.academics,
-  });
+    bool? onboardingCompleted,
+  }) : onboardingCompleted = onboardingCompleted ?? academics != null;
 
   final String id;
   final String handle;
@@ -26,10 +27,10 @@ class AccountProfile {
   final String? avatarUrl;
   final String bio;
 
-  /// Null until onboarding (academic profile) is complete.
+  /// Academic details when the account has a student profile.
   final UserProfile? academics;
 
-  bool get onboardingCompleted => academics != null;
+  final bool onboardingCompleted;
 }
 
 /// An organization verified by the server for the current publisher.

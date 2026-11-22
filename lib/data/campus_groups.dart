@@ -7,6 +7,7 @@ class CampusGroup {
     required this.id,
     required this.name,
     this.type,
+    this.uuid,
     this.shortName,
     this.handle,
     this.facultyAffiliation,
@@ -20,6 +21,7 @@ class CampusGroup {
   factory CampusGroup.fromRow(Map<String, dynamic> row) => CampusGroup(
     id: row['slug'] as String,
     name: row['name'] as String,
+    uuid: row['id'] as String?,
     type: OrganizationType.fromDb(row['type']),
     shortName: row['short_name'] as String?,
     handle: row['handle'] as String?,
@@ -32,6 +34,7 @@ class CampusGroup {
   /// `groups.slug`.
   final String id;
   final String name;
+  final String? uuid;
 
   /// Null when the server sends a type this version doesn't know.
   final OrganizationType? type;

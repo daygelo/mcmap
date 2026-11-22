@@ -223,3 +223,79 @@ with fixture identities and rolls back its data at the end.
 psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
   -f supabase/tests/event_publishing.sql
 ```
+
+## Organizer onboarding and operations
+
+After sign-in, new accounts can choose Student or Faculty / Club Executive.
+Students can also apply from **Profile → Organizer settings**. Staff can enter
+McMap without academic details and add an academic profile later if applicable.
+
+Angelo needs to apply
+[`20261122100300_organizer_onboarding.sql`](supabase/migrations/20261122100300_organizer_onboarding.sql)
+after the existing migrations, then deploy the `organizer-verification` Edge
+Function using the settings in `supabase/config.toml`. The function validates
+the signed-in user's access token with Supabase Auth. It uses the runtime's
+`SUPABASE_URL` and default publishable and secret keys, with legacy key
+fallbacks for older environments.
+
+Set these secrets in the Edge Function environment:
+
+- `ORGANIZER_CODE_SECRET` is a dedicated random secret of at least 32
+  characters. For example, generate it with `openssl rand -hex 32`. Rotating
+  it requires users with outstanding codes to request a new one.
+- `ORGANIZER_SES_REGION` selects an Amazon SES region with production sending
+  access and a verified sender identity.
+- `ORGANIZER_SES_ACCESS_KEY_ID` and `ORGANIZER_SES_SECRET_ACCESS_KEY` are AWS
+  IAM credentials scoped to `ses:SendEmail` for that sender identity. Set
+  `ORGANIZER_SES_SESSION_TOKEN` if the credentials include a session token.
+- `ORGANIZER_FROM_EMAIL` is the address for the verified SES sender identity.
+
+The function avoids logging verification requests, provider payloads, and
+provider errors. SES redacts the message body in its CloudTrail send records.
+See the [AWS SES logging documentation](https://docs.aws.amazon.com/ses/latest/dg/logging-using-cloudtrail.html).
+
+A trusted database operator adds reviewer account UUIDs to
+`public.organizer_administrators` and exact normalized email/group UUID pairs
+to `public.organizer_approved_contacts`. Verify each contact's authority with
+the organization before adding it. Removing an allowlist entry stops future
+automatic approvals. Revoke an existing approval separately.
+
+Reviewers call the Supabase RPCs with their own signed-in sessions:
+
+- `organizer_review_queue()` lists verified requests awaiting review.
+  Supply `application_status: 'approved'` to find approvals eligible for
+  revocation. For the next page, pass the last row's `created_at` and `id`
+  as `before_created_at` and `before_id`.
+- `organizer_review_application` takes `application_id`, `decision`
+  (`approved`, `rejected`, or `revoked`) and an optional `note` visible
+  to the applicant. Reviewers must independently confirm publishing authority.
+  A reviewer cannot manually decide their own application. Approval and
+  revocation update the organization assignment in the same transaction.
+  Reapplications after rejection or revocation go through manual review.
+- Trusted directory operators review `public.organizer_directory_requests`
+  in the database. Check for an existing group first. If the organization is
+  recognized and missing, add it through the existing directory process and
+  record `reviewed_at` and `reviewed_by`. Applicants then use the directory
+  to submit a separate publishing request.
+
+Codes expire after ten minutes and allow five verification attempts. Delivery
+is limited to one request per minute and five per day per account, and ten per
+day per normalized recipient. A delivery failure still consumes that send
+attempt. An operator can periodically delete delivery-rate entries older than
+one day and expired challenges. Keep application decisions for audit history.
+
+Run the backend regression suite against a migrated local Supabase instance:
+
+```sh
+psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+  -f supabase/tests/organizer_onboarding.sql
+```
+
+The Edge Function regression test uses mocked Auth, database, and email
+responses. It sends no email and can run without a Supabase project.
+
+```sh
+deno check supabase/functions/organizer-verification/index.ts
+deno test --allow-env=SUPABASE_URL,SUPABASE_PUBLISHABLE_KEYS,SUPABASE_SECRET_KEYS,SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,ORGANIZER_CODE_SECRET \
+  supabase/functions/organizer-verification/handler_test.ts
+```

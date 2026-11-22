@@ -193,9 +193,10 @@ class ProfileHeader extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
     await Clipboard.setData(
       ClipboardData(
-        text:
-            '${profile.name} on McMap · ${profile.major} · ${profile.year}, '
-            '${profile.faculty}',
+        text: profile.faculty.isEmpty
+            ? '${profile.name} on McMap'
+            : '${profile.name} on McMap · ${profile.major} · ${profile.year}, '
+                  '${profile.faculty}',
       ),
     );
     messenger.showSnackBar(
@@ -242,8 +243,10 @@ class ProfileHeader extends StatelessWidget {
             if (profile.handle == null)
               Text('Sample profile', style: text.bodySmall),
             const SizedBox(height: 4),
-            Text('${profile.major} · ${profile.year}'),
-            Text(profile.faculty, style: text.bodySmall),
+            if (profile.faculty.isNotEmpty) ...[
+              Text('${profile.major} · ${profile.year}'),
+              Text(profile.faculty, style: text.bodySmall),
+            ],
             if (profile.isFroshie) ...[
               const SizedBox(height: 8),
               const FroshieTag(),

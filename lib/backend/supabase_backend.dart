@@ -10,10 +10,11 @@ import '../models/user_profile.dart';
 import '../pages/student/student_profile.dart';
 import '../social/social_graph.dart';
 import 'mcmap_backend.dart';
+import 'organizer_backend.dart';
 
 /// [McMapBackend] on Supabase. Table and column names match
 /// supabase/migrations/20261121000100_mcmap_schema.sql.
-class SupabaseBackend implements McMapBackend {
+class SupabaseBackend implements McMapBackend, OrganizerBackend {
   SupabaseBackend(this.client);
 
   final SupabaseClient client;
@@ -42,12 +43,12 @@ class SupabaseBackend implements McMapBackend {
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
     final uid = _uid;
-    final state = await client
-        .from('profiles')
-        .select('onboarding_completed')
-        .eq('id', uid)
-        .single();
-    if (state['onboarding_completed'] == true) return;
+    final state = await client.from('profiles').select().eq('id', uid).single();
+    if (state['onboarding_completed'] == true &&
+        (state['account_purpose'] != 'organizer' ||
+            state['degree_level'] != null)) {
+      return;
+    }
 
     Map<String, DateTime?>? sessionFollows;
     if (profile.followedClubIds.isNotEmpty) {
@@ -175,6 +176,133 @@ class SupabaseBackend implements McMapBackend {
   }
 
   @override
+  Future<List<CampusGroup>> fetchOrganizerDirectory() async =>
+      (await fetchOrganizations()).values
+          .where((group) => group.uuid != null)
+          .toList();
+
+  @override
+  Future<List<OrganizerApplication>> fetchOrganizerApplications() async {
+    final rows = await client
+        .from('organizer_applications')
+        .select(
+          'id, group_id, full_name, executive_email, role, status, review_note, groups!inner(name)',
+        )
+        .eq('profile_id', _uid)
+        .order('created_at', ascending: false);
+    return [
+      for (final row in rows)
+        OrganizerApplication(
+          id: row['id'] as String,
+          details: (
+            groupId: row['group_id'] as String,
+            fullName: row['full_name'] as String,
+            email: row['executive_email'] as String,
+            role: ExecutiveRole.values.firstWhere(
+              (role) => role.dbValue == row['role'],
+            ),
+          ),
+          organization: row['groups']['name'] as String,
+          status: OrganizerStatus.values.firstWhere(
+            (status) => status.dbValue == row['status'],
+          ),
+          reviewNote: row['review_note'] as String?,
+        ),
+    ];
+  }
+
+  @override
+  Future<String> sendExecutiveCode(ExecutiveDetails details) async {
+    final result = await _organizerVerification({
+      'action': 'send',
+      'group_id': details.groupId,
+      'email': details.email,
+      'role': details.role.dbValue,
+      'full_name': details.fullName,
+    });
+    return result['id'] as String;
+  }
+
+  @override
+  Future<void> verifyExecutiveCode({
+    required String applicationId,
+    required String groupId,
+    required String code,
+  }) async {
+    await _organizerVerification({
+      'action': 'verify',
+      'id': applicationId,
+      'group_id': groupId,
+      'code': code,
+    });
+  }
+
+  Future<Map<String, dynamic>> _organizerVerification(
+    Map<String, String> body,
+  ) async {
+    final token = client.auth.currentSession?.accessToken;
+    if (token == null) {
+      throw const OrganizerRequestError(
+        'Sign in again to verify your executive email.',
+      );
+    }
+    final Map<String, dynamic> result;
+    try {
+      final response = await client.functions.invoke(
+        'organizer-verification',
+        headers: {'Authorization': 'Bearer $token'},
+        body: body,
+      );
+      result = response.data as Map<String, dynamic>;
+    } on FunctionException catch (error) {
+      if (error.status == 401) {
+        throw const OrganizerRequestError(
+          'Sign in again to verify your executive email.',
+        );
+      }
+      throw const OrganizerRequestError(
+        'Verification is unavailable. Try again later.',
+      );
+    }
+    final status = result['status'];
+    if (status == 'code_sent' ||
+        status == 'approved' ||
+        status == 'pending_review') {
+      return result;
+    }
+    throw OrganizerRequestError(switch (status) {
+      'invalid_details' => 'Check the executive email and application details.',
+      'already_submitted' => 'An active application exists for this organization. Refresh to see its status.',
+      'rate_limited' => 'Sending is limited to once per minute and five times per day. Try again later.',
+      'delivery_failed' =>
+        'The code could not be emailed. Wait a minute and try again.',
+      'invalid_code' =>
+        'That code is incorrect. Check the email and try again.',
+      'expired' => 'That code has expired. Request a new code.',
+      'attempts_exhausted' =>
+        'Too many incorrect attempts. Request a new code.',
+      _ => 'Verification is unavailable. Refresh and try again.',
+    });
+  }
+
+  @override
+  Future<void> requestOrganization(String name, OrganizerCategory category) =>
+      client.rpc<void>(
+        'organizer_request_directory_review',
+        params: {'requested_name': name, 'requested_type': category.name},
+      );
+
+  @override
+  Future<void> completeOrganizerOnboarding() async {
+    await client
+        .from('profiles')
+        .update({'account_purpose': 'organizer', 'onboarding_completed': true})
+        .eq('id', _uid)
+        .eq('onboarding_completed', false);
+    _profileRevision.value++;
+  }
+
+  @override
   Future<void> updateProfile(StudentProfile profile) async {
     final (degree, year) = standingToDb(profile.year);
     await client
@@ -182,9 +310,11 @@ class SupabaseBackend implements McMapBackend {
         .update({
           'full_name': profile.name,
           'bio': profile.bio,
-          ..._academicColumns(degree, year, profile.firstYearAtMcGill),
-          'faculty': profile.faculty,
-          'major': profile.major.isEmpty ? null : profile.major,
+          if (profile.faculty.isNotEmpty) ...{
+            ..._academicColumns(degree, year, profile.firstYearAtMcGill),
+            'faculty': profile.faculty,
+            'major': profile.major.isEmpty ? null : profile.major,
+          },
           'interests': profile.interests.toList(),
         })
         .eq('id', _uid);
@@ -381,6 +511,7 @@ class SupabaseBackend implements McMapBackend {
       fullName: row['full_name'] as String? ?? '',
       avatarUrl: row['avatar_url'] as String?,
       bio: row['bio'] as String? ?? '',
+      onboardingCompleted: done,
       academics: !done || degree == null || faculty == null
           ? null
           : UserProfile(

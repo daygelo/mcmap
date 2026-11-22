@@ -32,7 +32,7 @@ class LocalRsvps {
 
   void onPublished(
     ClubEvent event,
-    UserProfile profile, {
+    OrganizationPreferences profile, {
     required DateTime now,
   }) {
     if (!profile.followedClubIds.contains(event.clubId)) return;

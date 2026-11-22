@@ -11,6 +11,7 @@ import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/backend/mcmap_backend.dart';
 import 'package:mcmap/backend/supabase_backend.dart';
+import 'package:mcmap/backend/organizer_backend.dart';
 import 'package:mcmap/data/academics.dart';
 import 'package:mcmap/data/campus_groups.dart';
 import 'package:mcmap/data/clubs.dart';
@@ -23,6 +24,9 @@ import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/map_page.dart';
 import 'package:mcmap/pages/login_page.dart';
 import 'package:mcmap/pages/onboarding/interests_page.dart';
+import 'package:mcmap/pages/onboarding/academic_info_page.dart';
+import 'package:mcmap/pages/onboarding/account_purpose_page.dart';
+import 'package:mcmap/pages/onboarding/organizer_page.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/social/social_graph.dart';
@@ -312,7 +316,344 @@ Future<SupabaseBackend> _supabaseFollowing(
   return SupabaseBackend(client);
 }
 
+class FakeOrganizerBackend extends FakeBackend implements OrganizerBackend {
+  static const directory = [
+    CampusGroup(
+      id: 'science',
+      uuid: 'faculty-uuid',
+      name: 'Faculty of Science',
+      type: OrganizationType.faculty,
+    ),
+    CampusGroup(
+      id: 'sus',
+      uuid: 'society-uuid',
+      name: 'Science Undergraduate Society',
+      type: OrganizationType.studentSociety,
+    ),
+    CampusGroup(
+      id: 'robots',
+      uuid: 'club-uuid',
+      name: 'Robotics Club',
+      type: OrganizationType.club,
+    ),
+    CampusGroup(
+      id: 'research',
+      uuid: 'research-uuid',
+      name: 'Campus Research Group',
+      type: OrganizationType.researchGroup,
+    ),
+  ];
+
+  List<OrganizerApplication> applications = [];
+  ExecutiveDetails? submitted;
+
+  @override
+  Future<List<CampusGroup>> fetchOrganizerDirectory() async => directory;
+
+  @override
+  Future<List<OrganizerApplication>> fetchOrganizerApplications() async =>
+      applications;
+
+  @override
+  Future<String> sendExecutiveCode(ExecutiveDetails details) async {
+    submitted = details;
+    setStatus(OrganizerStatus.verifyEmail);
+    return 'application-id';
+  }
+
+  void setStatus(OrganizerStatus status) {
+    applications = [
+      OrganizerApplication(
+        id: 'application-id',
+        details: submitted!,
+        organization: 'Faculty of Science',
+        status: status,
+      ),
+    ];
+    publishingGroups = [
+      if (status == OrganizerStatus.approved)
+        const PublishingGroup(id: 'faculty-uuid', name: 'Faculty of Science'),
+    ];
+  }
+
+  @override
+  Future<void> verifyExecutiveCode({
+    required String applicationId,
+    required String groupId,
+    required String code,
+  }) async {
+    expect((applicationId, groupId), ('application-id', 'faculty-uuid'));
+    if (code != '12345678') {
+      throw const OrganizerRequestError('That code is incorrect.');
+    }
+    setStatus(OrganizerStatus.pendingReview);
+  }
+
+  @override
+  Future<void> requestOrganization(
+    String name,
+    OrganizerCategory category,
+  ) async {}
+
+  @override
+  Future<void> completeOrganizerOnboarding() async {}
+}
+
 void main() {
+  testWidgets('account purpose keeps the existing Student entry point', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => AccountPurposePage(
+            onStudent: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const AcademicInfoPage()),
+            ),
+            onOrganizer: () {},
+            onSignOut: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('How will you use McMap?'), findsOneWidget);
+    expect(find.text('Faculty / Club Executive'), findsOneWidget);
+    await tester.tap(find.text('Student'));
+    await tester.pumpAndSettle();
+    expect(find.text('What do you study?'), findsOneWidget);
+  });
+
+  testWidgets('executive directory filters by type and submits by UUID', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = FakeOrganizerBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrganizerPage(
+          backend: backend,
+          fullName: 'Faculty Staff',
+          onboarding: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final (category, group) in [
+      ('Student association / society', 'Science Undergraduate Society'),
+      ('Club', 'Robotics Club'),
+      ('Other recognized organization', 'Campus Research Group'),
+    ]) {
+      await tester.tap(find.text(category));
+      await tester.pumpAndSettle();
+      expect(find.text(group), findsOneWidget);
+      expect(find.text('Faculty of Science'), findsNothing);
+      await tester.tap(find.text('Change organization type'));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('Faculty'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Science');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('science')), findsOneWidget);
+    expect(find.text('Robotics Club'), findsNothing);
+    await tester.tap(find.text('Faculty of Science'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Official role'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Faculty representative').last);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Executive email address'),
+      'Office@Example.org',
+    );
+    await tester.tap(find.text('Send verification code'));
+    await tester.pumpAndSettle();
+    expect(backend.submitted, (
+      groupId: 'faculty-uuid',
+      fullName: 'Faculty Staff',
+      email: 'office@example.org',
+      role: ExecutiveRole.facultyRepresentative,
+    ));
+    expect(find.text('Verify your executive email'), findsOneWidget);
+    final codeField = find.widgetWithText(TextFormField, 'Verification code');
+    await tester.enterText(codeField, '00000000');
+    await tester.tap(find.text('Verify email'));
+    await tester.pumpAndSettle();
+    expect(find.text('That code is incorrect.'), findsOneWidget);
+    await tester.enterText(codeField, '12345678');
+    await tester.tap(find.text('Verify email'));
+    await tester.pumpAndSettle();
+    expect(find.text('Awaiting approval'), findsOneWidget);
+    expect(find.text('Continue to McMap'), findsOneWidget);
+    expect(backend.publishingGroups, isEmpty);
+  });
+
+  testWidgets(
+    'existing students retain academics while publisher access changes',
+    (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final backend = FakeOrganizerBackend()
+        ..submitted = (
+          groupId: 'faculty-uuid',
+          fullName: 'Existing Student',
+          email: 'office@example.org',
+          role: ExecutiveRole.coordinator,
+        )
+        ..setStatus(OrganizerStatus.pendingReview);
+      final account = AccountProfile(
+        id: 'student-account',
+        handle: 'student',
+        fullName: 'Existing Student',
+        academics: _profile,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomePage(
+            backend: backend,
+            account: account,
+            profile: account.academics,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Create'), findsNothing);
+      await tester.tap(find.text('Profile').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Organizer settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Awaiting approval'), findsOneWidget);
+      backend.setStatus(OrganizerStatus.approved);
+      await tester.tap(find.byTooltip('Refresh organizer status'));
+      await tester.pumpAndSettle();
+      expect(find.text('Verified organizer'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Create'), findsOneWidget);
+      expect(find.textContaining(_profile.major!), findsWidgets);
+      await tester.tap(find.text('Create'));
+      await tester.pumpAndSettle();
+      backend.setStatus(OrganizerStatus.revoked);
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      expect(find.text('Create'), findsNothing);
+      await tester.tap(find.text('Organizer settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Publishing access revoked'), findsOneWidget);
+      expect(find.text('Apply again'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('staff profile displays the account without demo academics', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HomePage(
+          account: AccountProfile(
+            id: 'staff',
+            handle: 'staff',
+            fullName: 'Faculty Staff',
+            onboardingCompleted: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Faculty Staff'), findsOneWidget);
+    expect(find.text('Software Engineering · U0'), findsNothing);
+    expect(find.text('Faculty of Engineering'), findsNothing);
+  });
+
+  test('organizer completion leaves academic columns empty and can load the profile', () async {
+    final row = <String, dynamic>{
+      'id': _followingProfileId,
+      'handle': 'staff',
+      'full_name': 'Faculty Staff',
+      'onboarding_completed': false,
+    };
+    final backend = await _supabaseFollowing(
+      () => throw StateError('Unexpected request'),
+      onRequest: (request) {
+        expect(request.url.path, '/rest/v1/profiles');
+        if (request.method == 'PATCH') {
+          final changes = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(changes, {
+            'account_purpose': 'organizer',
+            'onboarding_completed': true,
+          });
+          row.addAll(changes);
+          return http.Response('', 204);
+        }
+        return _jsonResponse(row);
+      },
+    );
+    await backend.completeOrganizerOnboarding();
+    final profile = await backend.loadMyProfile();
+    expect(profile.onboardingCompleted, isTrue);
+    expect(profile.academics, isNull);
+  });
+
+  test(
+    'executive verification uses the current session and a separate email',
+    () async {
+      var attempts = 0;
+      final backend = await _supabaseFollowing(
+        () => throw StateError('Unexpected request'),
+        onRequest: (request) {
+          expect(request.url.path, '/functions/v1/organizer-verification');
+          expect(
+            request.headers['authorization'],
+            'Bearer eyJhbGciOiJub25lIn0.e30.fake',
+          );
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['group_id'], 'group-uuid');
+          if (body['action'] == 'send') {
+            expect(body['email'], 'executive@example.org');
+            return _jsonResponse({
+              'status': 'code_sent',
+              'id': 'application-id',
+            });
+          }
+          expect(body['id'], 'application-id');
+          return _jsonResponse({
+            'status': ++attempts == 1 ? 'expired' : 'pending_review',
+          });
+        },
+      );
+      final session = backend.client.auth.currentSession;
+      final id = await backend.sendExecutiveCode((
+        groupId: 'group-uuid',
+        fullName: 'Faculty Staff',
+        email: 'executive@example.org',
+        role: ExecutiveRole.facultyRepresentative,
+      ));
+      Future<void> verify() => backend.verifyExecutiveCode(
+        applicationId: id,
+        groupId: 'group-uuid',
+        code: '12345678',
+      );
+      await expectLater(
+        verify(),
+        throwsA(
+          isA<OrganizerRequestError>().having(
+            (error) => error.message,
+            'message',
+            contains('expired'),
+          ),
+        ),
+      );
+      await verify();
+      expect(backend.client.auth.currentSession, same(session));
+    },
+  );
+
   test('only a missing Following table matches the Supabase fallback', () {
     const schemaCache = PostgrestException(
       code: 'PGRST205',

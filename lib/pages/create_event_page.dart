@@ -23,6 +23,7 @@ class CreateEventPage extends StatefulWidget {
 
 class _CreateEventPageState extends State<CreateEventPage> {
   final _form = GlobalKey<FormState>();
+  int _formGeneration = 0;
   final _title = TextEditingController();
   final _description = TextEditingController();
   final _location = TextEditingController();
@@ -35,6 +36,14 @@ class _CreateEventPageState extends State<CreateEventPage> {
 
   String? get _initialGroup =>
       widget.groups.length == 1 ? widget.groups.single.id : null;
+
+  @override
+  void didUpdateWidget(CreateEventPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.groups.any((group) => group.id == _groupId)) {
+      _groupId = _initialGroup;
+    }
+  }
 
   @override
   void dispose() {
@@ -130,6 +139,7 @@ class _CreateEventPageState extends State<CreateEventPage> {
     if (!mounted) return;
 
     _form.currentState!.reset();
+
     _title.clear();
     _description.clear();
     _location.clear();
@@ -137,6 +147,7 @@ class _CreateEventPageState extends State<CreateEventPage> {
     setState(() {
       _publishing = false;
       _groupId = _initialGroup;
+      _formGeneration++;
       _start = null;
       _end = null;
     });
@@ -224,7 +235,11 @@ class _CreateEventPageState extends State<CreateEventPage> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              initialValue: _initialGroup,
+              key: ValueKey((
+                _formGeneration,
+                widget.groups.map((group) => group.id).join(','),
+              )),
+              initialValue: _groupId,
               decoration: const InputDecoration(labelText: 'Organization'),
               isExpanded: true,
               items: [

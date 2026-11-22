@@ -1,0 +1,4 @@
+project_id = "mcmap"
+
+[functions.organizer-verification]
+verify_jwt = false

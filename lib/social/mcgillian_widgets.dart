@@ -165,7 +165,7 @@ class McGillianTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    '@${student.handle} · ${student.major} · ${student.year}',
+                    '${student.major} · ${student.year}',
                     style: text.bodySmall,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -198,7 +198,7 @@ class McGillianProfilePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: Text('@${student.handle}')),
+      appBar: AppBar(title: const Text('Student profile')),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

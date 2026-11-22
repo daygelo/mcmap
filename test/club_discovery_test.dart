@@ -10,6 +10,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/models/club_event.dart';
 import 'package:mcmap/models/user_profile.dart';
+import 'package:mcmap/pages/all_events_page.dart';
+import 'package:mcmap/pages/event_details_page.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/student/club_discovery.dart';
 import 'package:mcmap/pages/student/suggested_clubs.dart';
@@ -98,6 +100,210 @@ Finder _eventCard(String title) => find
     .hitTestable();
 
 void main() {
+  testWidgets(
+    'For You groups followed organizations above suggestions and jumps to the heading',
+    (tester) async {
+      const facultyId = 'faculty-of-engineering';
+      final stream = StreamController<ClubEvent>();
+      addTearDown(stream.close);
+      await _start(
+        tester,
+        followed: const {_esportsId, _boardGamesId, facultyId},
+        publications: stream.stream,
+      );
+      await tester.binding.setSurfaceSize(const Size(600, 550));
+      final now = DateTime.now();
+      ClubEvent facultyEvent(String title, int days) => ClubEvent(
+        title,
+        title,
+        'Faculty of Engineering',
+        '',
+        'Campus',
+        clubId: facultyId,
+        startsAt: now.add(Duration(days: days)),
+        createdAt: now.subtract(const Duration(days: 1)),
+      );
+      stream
+        ..add(_published('esports', _esportsId, 'Esports followed event'))
+        ..add(_published('board', _boardGamesId, 'Board followed event'))
+        ..add(facultyEvent('Faculty upcoming event', 1))
+        ..add(facultyEvent('Faculty later event', 2))
+        ..add(facultyEvent('Faculty past event', -1));
+      await tester.pumpAndSettle();
+
+      final forYou = find.widgetWithText(ChoiceChip, 'For You');
+      expect(tester.widget<ChoiceChip>(forYou).selected, isTrue);
+      final followed = find.text('From groups you follow');
+      final suggested = find.text('Suggested events');
+      expect(
+        tester.getTopLeft(followed).dy,
+        lessThan(tester.getTopLeft(suggested).dy),
+      );
+      expect(find.text('Faculty upcoming event'), findsOneWidget);
+      expect(find.text('Faculty later event'), findsNothing);
+      expect(find.text('Faculty past event'), findsNothing);
+      expect(suggested.hitTestable(), findsNothing);
+
+      await _tapText(tester, 'Jump to suggested events');
+      expect(suggested.hitTestable(), findsOneWidget);
+      final sample = find.text('Board Game Night');
+      expect(sample, findsOneWidget);
+      expect(
+        tester.getTopLeft(sample).dy,
+        greaterThan(tester.getTopLeft(suggested).dy),
+      );
+      expect(find.text('Faculty upcoming event'), findsOneWidget);
+      await _tapText(tester, 'View all');
+      expect(find.byType(AllEventsPage), findsOneWidget);
+      await _back(tester);
+
+      final bottom = find.widgetWithText(FilledButton, 'View All Events');
+      await tester.scrollUntilVisible(
+        bottom,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _tap(tester, bottom);
+      expect(find.byType(AllEventsPage), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'All Events keeps individual cards, ordering, filters, details and RSVPs',
+    (tester) async {
+      final stream = StreamController<ClubEvent>();
+      addTearDown(stream.close);
+      await _start(
+        tester,
+        followed: const {_esportsId},
+        publications: stream.stream,
+      );
+      final now = DateTime.now();
+      ClubEvent event(
+        String title,
+        String clubId,
+        int createdDaysAgo, {
+        bool frosh = false,
+        List<String> tags = const [],
+        DateTime? publication,
+      }) => ClubEvent(
+        title,
+        title,
+        _name(clubId),
+        '',
+        'Campus',
+        clubId: clubId,
+        isFrosh: frosh,
+        tags: tags,
+        createdAt: now.subtract(Duration(days: createdDaysAgo)),
+        startsAt: now.add(Duration(days: createdDaysAgo)),
+        publishedAt: publication,
+        synopsis: 'Event summary for $title.',
+      );
+      stream
+        ..add(event('Older esports', _esportsId, 3, frosh: true))
+        ..add(
+          event(
+            'Engineering workshop',
+            _boardGamesId,
+            2,
+            tags: ['engineering'],
+          ),
+        )
+        ..add(event('Newest esports', _esportsId, 1))
+        ..add(
+          event(
+            'Unlisted publication',
+            _boardGamesId,
+            0,
+            publication: now.add(const Duration(days: 1)),
+          ),
+        );
+      await tester.pumpAndSettle();
+      await _tapText(tester, 'View all');
+      final allEvents = find.byType(AllEventsPage);
+      Finder title(String title) =>
+          find.descendant(of: allEvents, matching: find.text(title));
+      expect(title('Unlisted publication'), findsNothing);
+      expect(title('Newest esports').hitTestable(), findsOneWidget);
+      expect(title('Older esports').hitTestable(), findsOneWidget);
+      expect(
+        tester.getTopLeft(title('Newest esports')).dy,
+        lessThan(tester.getTopLeft(title('Older esports')).dy),
+      );
+      final newestCard = _eventCard('Newest esports');
+      final date = MaterialLocalizations.of(tester.element(allEvents))
+          .formatFullDate(now.add(const Duration(days: 1)));
+      expect(
+        find.descendant(of: newestCard, matching: find.textContaining(date)),
+        findsOneWidget,
+      );
+      expect(find.text('AI SUMMARY'), findsNothing);
+
+      Future<void> filter(String label) =>
+          _tap(tester, find.widgetWithText(ChoiceChip, label));
+      await filter('Following');
+      expect(title('Engineering workshop'), findsNothing);
+      expect(title('Newest esports'), findsOneWidget);
+      expect(title('Older esports'), findsOneWidget);
+      await filter('Faculty');
+      expect(title('Engineering workshop'), findsOneWidget);
+      expect(title('Newest esports'), findsNothing);
+      await filter('Froshie');
+      expect(title('Older esports'), findsOneWidget);
+      expect(title('Newest esports'), findsNothing);
+      await filter('All');
+      expect(title('Engineering workshop'), findsOneWidget);
+
+      await _tap(
+        tester,
+        find.descendant(
+          of: _eventCard('Newest esports'),
+          matching: find.text('RSVP'),
+        ),
+      );
+      expect(
+        find.descendant(
+          of: _eventCard('Newest esports'),
+          matching: find.text('Cancel RSVP'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: _eventCard('Older esports'),
+          matching: find.text('RSVP'),
+        ),
+        findsOneWidget,
+      );
+      await _tap(tester, title('Newest esports'));
+      expect(find.byType(EventDetailsPage), findsOneWidget);
+      await _tapText(tester, 'Cancel RSVP');
+      await _back(tester);
+      expect(
+        find.descendant(
+          of: _eventCard('Newest esports'),
+          matching: find.text('RSVP'),
+        ),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('All Events is available without followed organizations', (
+    tester,
+  ) async {
+    await _start(tester);
+    expect(find.text('From groups you follow'), findsNothing);
+    expect(find.text('Jump to suggested events'), findsNothing);
+    await _tapText(tester, 'View all');
+    expect(find.byType(AllEventsPage), findsOneWidget);
+    await _tap(tester, find.widgetWithText(ChoiceChip, 'Following'));
+    expect(find.text('No events match this filter yet.'), findsOneWidget);
+  });
+
   testWidgets(
     'club feed groups previews and keeps RSVP on the previewed event',
     (tester) async {
@@ -661,7 +867,7 @@ void main() {
     expect(find.text('Coding night').hitTestable(), findsNothing);
     expect(find.text('Campus Coding Meetup').hitTestable(), findsNothing);
     expect(find.text('Cancel RSVP').hitTestable(), findsOneWidget);
-    await _tapText(tester, 'All Events');
+    await _tapText(tester, 'For You');
     expect(find.text('Coding night').hitTestable(), findsOneWidget);
     expect(find.text('Campus Coding Meetup').hitTestable(), findsOneWidget);
 

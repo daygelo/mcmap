@@ -44,6 +44,7 @@ class EditProfilePage extends StatefulWidget {
 
 class _EditProfilePageState extends State<EditProfilePage> {
   final _form = GlobalKey<FormState>();
+  late final _name = TextEditingController(text: widget.profile.name);
   late final _major = TextEditingController(text: widget.profile.major);
   late final _bio = TextEditingController(text: widget.profile.bio);
   late final _interests = {...widget.profile.interests};
@@ -56,6 +57,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   @override
   void dispose() {
+    _name.dispose();
     _major.dispose();
     _bio.dispose();
     super.dispose();
@@ -79,7 +81,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       await widget.onSave(
         StudentProfile(
-          name: widget.profile.name,
+          name: _name.text.trim(),
           faculty: _faculty,
           major: _major.text.trim(),
           year: _year,
@@ -180,6 +182,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       onChanged: _saving
                           ? null
                           : (value) => setState(() => _year = value!),
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _name,
+                      enabled: !_saving,
+                      decoration: const InputDecoration(
+                        labelText: 'Display name',
+                      ),
+                      validator: (value) => value!.trim().isEmpty
+                          ? 'Enter your display name.'
+                          : null,
                     ),
                     const SizedBox(height: 16),
                     TextFormField(

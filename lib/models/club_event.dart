@@ -9,6 +9,7 @@ class ClubEvent {
     this.isFrosh = false,
     this.clubId,
     this.publishedAt,
+    this.createdAt,
     this.startsAt,
     this.endsAt,
     this.description,
@@ -29,6 +30,9 @@ class ClubEvent {
   final bool isFrosh;
   final String? clubId;
   final DateTime? publishedAt;
+
+  /// When the event was created, independent of its scheduled start.
+  final DateTime? createdAt;
   final DateTime? startsAt;
   final DateTime? endsAt;
   final String? description;

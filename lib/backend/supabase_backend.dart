@@ -369,6 +369,7 @@ class SupabaseBackend implements McMapBackend {
       clubAvatarUrl: group?['avatar_url'] as String?,
       isFrosh: row['is_froshie_event'] == true,
       publishedAt: time('published_at'),
+      createdAt: time('created_at'),
       startsAt: time('starts_at'),
       endsAt: time('ends_at'),
       description: row['full_description'] as String?,
@@ -388,7 +389,7 @@ class SupabaseBackend implements McMapBackend {
       id: row['id'] as String,
       name: (row['full_name'] as String?)?.trim().isNotEmpty == true
           ? row['full_name'] as String
-          : '@${row['handle']}',
+          : 'McMap Student',
       handle: row['handle'] as String,
       faculty: row['faculty'] as String? ?? '',
       major: row['major'] as String? ?? '',

@@ -31,6 +31,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class FakeBackend implements McMapBackend {
   final _revision = ValueNotifier(0);
   UserProfile? savedOnboarding;
+  StudentProfile? savedProfile;
   final rsvpCalls = <(String, StudentVisibility?)>[];
   final added = <String>[];
   final removed = <String>[];
@@ -128,7 +129,9 @@ class FakeBackend implements McMapBackend {
   }
 
   @override
-  Future<void> updateProfile(StudentProfile profile) async {}
+  Future<void> updateProfile(StudentProfile profile) async {
+    savedProfile = profile;
+  }
 
   @override
   Future<String> uploadAvatar(Uint8List bytes) async => 'https://x/a.png';
@@ -852,8 +855,16 @@ void main() {
 
       await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
-      expect(find.text('@gab.a'), findsOneWidget);
+      expect(find.text('@gab.a'), findsNothing);
       expect(find.text('Gab A'), findsOneWidget);
+      await tester.tap(find.text('Edit Profile'));
+      await tester.pumpAndSettle();
+      final name = find.widgetWithText(TextFormField, 'Display name');
+      await tester.enterText(name, '  Gabby A  ');
+      await tester.tap(find.text('Save Changes'));
+      await tester.pumpAndSettle();
+      expect(backend.savedProfile?.name, 'Gabby A');
+      expect(find.text('Gabby A'), findsOneWidget);
 
       await tester.tap(find.text('Home'));
       await tester.pumpAndSettle();
@@ -862,6 +873,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
       expect(find.text('Sam Private'), findsOneWidget);
+      expect(find.textContaining('@sam.p'), findsNothing);
 
       await tester.tap(
         find.descendant(

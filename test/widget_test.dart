@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:mcmap/main.dart';
 import 'package:mcmap/pages/home_page.dart';
+import 'package:mcmap/pages/student/suggested_clubs.dart';
+import 'package:mcmap/widgets/mcmap_logo.dart';
 import 'package:mcmap/theme/app_theme.dart';
 import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
@@ -89,6 +91,17 @@ void main() {
           tester.getBottomLeft(find.byType(AppBar)).dy,
       inInclusiveRange(0, 20),
     );
+    final wordmark = find.byType(McMapWordmark);
+    final logo = find.descendant(
+      of: wordmark,
+      matching: find.byType(McMapLogo),
+    );
+    expect(logo, findsOneWidget);
+    expect(tester.getSize(logo), const Size.square(32));
+    expect(
+      tester.getTopRight(logo).dx,
+      lessThan(tester.getTopLeft(find.text('McMap')).dx),
+    );
     final header = tester.element(find.text('McMap'));
     final appBar = tester.widget<AppBar>(find.byType(AppBar));
     final titleStyle = DefaultTextStyle.of(header).style;
@@ -142,52 +155,68 @@ void main() {
     expect(find.text('No club events match your search.'), findsOneWidget);
   });
 
-  testWidgets('the club feed ends after events at four viewport widths', (
-    tester,
-  ) async {
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    for (final width in [320.0, 390.0, 768.0, 1280.0]) {
-      await tester.binding.setSurfaceSize(Size(width, 600));
-      await tester.pumpWidget(
-        MaterialApp(
-          key: ValueKey(width),
-          theme: buildMcMapTheme(),
-          home: const HomePage(),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final feed = find.byType(ListView).first;
-      final lastEvent = find.text('Campus Coding Meetup');
-      final scrollable = tester.state<ScrollableState>(
-        find.descendant(of: feed, matching: find.byType(Scrollable)).first,
-      );
-      // The lazy list only estimates its length until the last cards are
-      // built, so keep jumping to the end until the extent stops growing.
-      double? extent;
-      while (extent != scrollable.position.maxScrollExtent) {
-        extent = scrollable.position.maxScrollExtent;
-        scrollable.position.jumpTo(extent);
+  testWidgets(
+    'the Home feed ends with View All Events at four viewport widths',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final width in [320.0, 390.0, 768.0, 1280.0]) {
+        await tester.binding.setSurfaceSize(Size(width, 600));
+        await tester.pumpWidget(
+          MaterialApp(
+            key: ValueKey(width),
+            theme: buildMcMapTheme(),
+            home: const HomePage(),
+          ),
+        );
         await tester.pumpAndSettle();
-      }
+        final header = tester.getRect(find.byType(AppBar));
+        expect(
+          header.contains(tester.getCenter(find.byType(McMapLogo))),
+          isTrue,
+        );
+        expect(header.contains(tester.getCenter(find.text('McMap'))), isTrue);
+        final feed = find.byType(ListView).first;
+        final lastEvent = find.text('Campus Coding Meetup');
+        final scrollable = tester.state<ScrollableState>(
+          find.descendant(of: feed, matching: find.byType(Scrollable)).first,
+        );
+        // The lazy list only estimates its length until the last cards are
+        // built, so keep jumping to the end until the extent stops growing.
+        double? extent;
+        while (extent != scrollable.position.maxScrollExtent) {
+          extent = scrollable.position.maxScrollExtent;
+          scrollable.position.jumpTo(extent);
+          await tester.pumpAndSettle();
+        }
 
-      for (final label in [
-        'Explore campus',
-        'Campus map',
-        'Buildings',
-        'Dining',
-        'Parking',
-      ]) {
-        expect(find.text(label), findsNothing);
+        for (final label in [
+          'Explore campus',
+          'Campus map',
+          'Buildings',
+          'Dining',
+          'Parking',
+        ]) {
+          expect(find.text(label), findsNothing);
+        }
+        expect(lastEvent.hitTestable(), findsOneWidget);
+        final lastCard = find.ancestor(
+          of: lastEvent,
+          matching: find.byType(Card),
+        );
+        final viewAll = find.widgetWithText(FilledButton, 'View All Events');
+        expect(viewAll.hitTestable(), findsOneWidget);
+        expect(
+          tester.getRect(viewAll).top,
+          greaterThan(tester.getRect(lastCard).bottom),
+        );
+        expect(
+          tester.getRect(feed).bottom - tester.getRect(viewAll).bottom,
+          24,
+        );
+        expect(tester.takeException(), isNull);
       }
-      expect(lastEvent.hitTestable(), findsOneWidget);
-      final lastCard = find.ancestor(
-        of: lastEvent,
-        matching: find.byType(Card),
-      );
-      expect(tester.getRect(feed).bottom - tester.getRect(lastCard).bottom, 24);
-      expect(tester.takeException(), isNull);
-    }
-  });
+    },
+  );
 
   testWidgets('shows an RSVP in Profile and syncs cancellation to Home', (
     tester,
@@ -426,9 +455,17 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(find.text('Coding').hitTestable(), findsOneWidget);
+    expect(find.text('Software Engineering · Engineering'), findsNothing);
+    expect(find.text('Coding').hitTestable(), findsNothing);
     expect(find.text('Board Game Night'), findsOneWidget);
+    await tester.tap(find.text('Discover Clubs'));
+    await tester.pumpAndSettle();
+    final recommendations = tester.widget<SuggestedClubs>(
+      find.byType(SuggestedClubs),
+    );
+    expect(recommendations.faculty, 'Engineering');
+    expect(recommendations.major, 'Software Engineering');
+    expect(recommendations.interests, contains('Coding'));
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Coding').hitTestable(), findsOneWidget);
@@ -459,11 +496,9 @@ void main() {
     await tester.pumpAndSettle();
     await _skipClubs(tester);
 
-    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(
-      find.textContaining('Showing events for U2 Engineering students'),
-      findsOneWidget,
-    );
+    expect(find.text('Software Engineering · Engineering'), findsNothing);
+    expect(find.textContaining('Showing events for'), findsNothing);
+    expect(find.text('Suggested events'), findsOneWidget);
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Software Engineering · U2'), findsOneWidget);
@@ -537,10 +572,11 @@ void main() {
     await tester.pumpAndSettle();
     await _skipClubs(tester);
 
-    expect(
-      find.text('Undeclared / Freshman Program · Science'),
-      findsOneWidget,
-    );
+    expect(find.text('Undeclared / Freshman Program · Science'), findsNothing);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Undeclared / Freshman Program · U0'), findsOneWidget);
+    expect(find.text('Science'), findsOneWidget);
   });
 
   testWidgets('exchange students can continue without a major', (tester) async {
@@ -711,7 +747,8 @@ void main() {
       await tester.tap(find.text('Chloé Gagnon'));
       await tester.pumpAndSettle();
 
-      expect(find.text('@chloe.g'), findsOneWidget);
+      expect(find.text('@chloe.g'), findsNothing);
+      expect(find.text('Chloé Gagnon'), findsOneWidget);
       expect(find.byType(FroshieTag), findsOneWidget, reason: 'U1 first-year');
       expect(statCount(tester), 31);
       await tester.tap(find.text('Add Friend'));

@@ -1,8 +1,7 @@
 import '../models/club_event.dart';
 import 'clubs.dart';
 
-/// One feed entry per verified club. Events without a catalog ID keep their
-/// own entry, even if their publisher labels happen to match.
+/// A preview event and its organizer's remaining events.
 class ClubFeedEntry {
   const ClubFeedEntry(this.event, {this.club, this.additionalEvents = 0});
 
@@ -16,6 +15,7 @@ List<ClubFeedEntry> buildClubEventFeed(
   required DateTime now,
   required String query,
   Set<String>? followedOnly,
+  bool groupAllOrganizations = false,
 }) {
   final groups = <String, List<ClubEvent>>{};
   final entries = <ClubFeedEntry>[];
@@ -27,10 +27,11 @@ List<ClubFeedEntry> buildClubEventFeed(
       continue;
     }
     order[event.id] = order.length;
-    if (club == null) {
+    final groupId = groupAllOrganizations ? event.clubId : club?.id;
+    if (groupId == null || groupId.isEmpty) {
       if (event.matches(query)) entries.add(ClubFeedEntry(event));
     } else {
-      (groups[club.id] ??= []).add(event);
+      (groups[groupId] ??= []).add(event);
     }
   }
 
@@ -41,9 +42,9 @@ List<ClubFeedEntry> buildClubEventFeed(
 
   final normalizedQuery = normalizeClubSearch(query);
   for (final group in groups.entries) {
-    final club = clubsById[group.key]!;
+    final club = clubsById[group.key];
     final matchesClub =
-        normalizedQuery.isNotEmpty && club.matches(normalizedQuery);
+        normalizedQuery.isNotEmpty && club?.matches(normalizedQuery) == true;
     final matches =
         group.value.where((event) {
           if (query.isEmpty) return event.canRsvpAt(now);
@@ -70,8 +71,44 @@ List<ClubFeedEntry> buildClubEventFeed(
       ),
     );
   }
-  entries.sort((a, b) => compare(a.event, b.event));
+  // Select previews by schedule, then rank those previews by creation time.
+  entries.sort((a, b) {
+    final newestFirst = _compareCreationTime(a.event, b.event);
+    if (newestFirst != 0) return newestFirst;
+    return order[a.event.id]!.compareTo(order[b.event.id]!);
+  });
   return entries;
+}
+
+/// Every listed event, with each event retaining its own RSVP.
+List<ClubEvent> allCampusEvents(Iterable<ClubEvent> events, DateTime now) {
+  final listed =
+      [
+        for (final (index, event) in events.indexed)
+          if (event.isListedAt(now)) (index, event),
+      ]..sort((a, b) {
+        final newestFirst = _compareCreationTime(a.$2, b.$2);
+        return newestFirst == 0 ? a.$1.compareTo(b.$1) : newestFirst;
+      });
+  return [for (final (_, event) in listed) event];
+}
+
+int _compareCreationTime(ClubEvent a, ClubEvent b) {
+  final aTime = a.createdAt ?? a.publishedAt;
+  final bTime = b.createdAt ?? b.publishedAt;
+  if (aTime == null) return bTime == null ? 0 : 1;
+  return bTime == null ? -1 : bTime.compareTo(aTime);
+}
+
+bool eventMatchesFaculty(ClubEvent event, String faculty) {
+  final name = normalizeClubSearch(faculty).replaceFirst('faculty of ', '');
+  if (name.isEmpty) return false;
+  final category = clubsById[event.clubId]?.category ?? '';
+  return [
+    event.club,
+    category,
+    ...event.tags,
+  ].any((value) => ' ${normalizeClubSearch(value)} '.contains(' $name '));
 }
 
 /// The same chronology drives the featured event and the upcoming list.

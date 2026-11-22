@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../theme/app_theme.dart';
+import 'mcmap_logo.dart';
 
 /// Shared McGill-styled layout for the sign-in screens: off-white page, a
 /// thin McGill-red band on top, and a centred white card with an icon in a
@@ -8,7 +9,7 @@ import '../theme/app_theme.dart';
 class AuthScaffold extends StatelessWidget {
   const AuthScaffold({
     super.key,
-    required this.icon,
+    this.icon,
     required this.title,
     required this.children,
     this.subtitle,
@@ -16,7 +17,9 @@ class AuthScaffold extends StatelessWidget {
     this.backLabel = 'Back',
   });
 
-  final IconData icon;
+  /// Status icon in a red-tint circle (setup, errors). Null shows the
+  /// McMap logo.
+  final IconData? icon;
   final String title;
   final String? subtitle;
   final List<Widget> children;
@@ -64,19 +67,22 @@ class AuthScaffold extends StatelessWidget {
                               const SizedBox(height: 8),
                             const SizedBox(height: 8),
                             Center(
-                              child: Container(
-                                width: 72,
-                                height: 72,
-                                decoration: const BoxDecoration(
-                                  color: McMapColors.redTint,
-                                  shape: BoxShape.circle,
+                              child: switch (icon) {
+                                final icon? => Container(
+                                  width: 72,
+                                  height: 72,
+                                  decoration: const BoxDecoration(
+                                    color: McMapColors.redTint,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    icon,
+                                    size: 36,
+                                    color: McMapColors.redStrong,
+                                  ),
                                 ),
-                                child: Icon(
-                                  icon,
-                                  size: 36,
-                                  color: McMapColors.redStrong,
-                                ),
-                              ),
+                                null => const McMapLogo(size: 80),
+                              },
                             ),
                             const SizedBox(height: 20),
                             Text(

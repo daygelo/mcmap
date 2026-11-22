@@ -4,7 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/backend/mcmap_backend.dart';
+import 'package:mcmap/backend/supabase_backend.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'
+    show AuthException, PostgrestException;
 import 'package:mcmap/data/academics.dart';
+import 'package:mcmap/data/auto_follow.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/main.dart';
 import 'package:mcmap/models/club_event.dart';
@@ -13,10 +17,12 @@ import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/login_page.dart';
 import 'package:mcmap/pages/onboarding/interests_page.dart';
+import 'package:mcmap/pages/student/club_discovery.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/social/social_graph.dart';
 import 'package:mcmap/theme/app_theme.dart';
+import 'package:mcmap/widgets/mcmap_logo.dart';
 
 /// In-memory stand-in for Supabase that records what the app saved.
 class FakeBackend implements McMapBackend {
@@ -34,7 +40,7 @@ class FakeBackend implements McMapBackend {
       'Students’ Society of McGill University (SSMU)',
       '',
       'SSMU Ballroom',
-      clubId: 'ssmu',
+      clubId: 'mcgill-ssmu',
       startsAt: DateTime.now().add(const Duration(days: 2)),
       publishedAt: DateTime.now().subtract(const Duration(days: 1)),
       synopsis: 'Teams of four, six rounds, prizes for the top three.',
@@ -119,6 +125,23 @@ class FakeBackend implements McMapBackend {
   Future<void> removeMcGillian(String profileId) async =>
       removed.add(profileId);
 
+  final clubCalls = <String>[];
+
+  @override
+  Future<void> setClubFollow(String clubId, {required bool following}) async =>
+      clubCalls.add('${following ? 'follow' : 'unfollow'} $clubId');
+
+  @override
+  Future<void> setClubNotifications(String clubId, DateTime? enabledAt) async =>
+      clubCalls.add('notify ${enabledAt != null} $clubId');
+
+  @override
+  Future<void> saveClubMembership(
+    String clubId,
+    ClubMembership? membership,
+  ) async =>
+      clubCalls.add('${membership == null ? 'leave' : 'member'} $clubId');
+
   @override
   Future<void> signOut() async {}
 }
@@ -171,6 +194,7 @@ void main() {
         MaterialApp(theme: buildMcMapTheme(), home: const LoginPage()),
       );
       expect(find.text('Welcome to McMap'), findsOneWidget);
+      expect(find.byType(McMapLogo), findsOneWidget);
       expect(find.byKey(const Key('email-field')), findsOneWidget);
       expect(
         find.byKey(const Key('email-confirmation-checkbox')),
@@ -214,6 +238,164 @@ void main() {
       clubCatalog.where((c) => !slug.hasMatch(c.id)).map((c) => c.id),
       isEmpty,
     );
+  });
+
+  group('automatic follows', () {
+    Set<String> follows(UserProfile p) => applyAutoFollows(p).followedClubIds;
+    Set<String> members(UserProfile p) =>
+        applyAutoFollows(p).memberships.keys.toSet();
+
+    test('every rule points at a catalog club', () {
+      expect(
+        autoFollowRules
+            .map((r) => r.clubId)
+            .where((id) => !clubsById.containsKey(id)),
+        isEmpty,
+      );
+      expect(
+        {
+          ...campusSocietyIds,
+          ...facultyAssociationIds,
+        }.where((id) => !clubsById.containsKey(id)),
+        isEmpty,
+      );
+    });
+
+    test('U0 Engineering: SSMU, EUS and both First-Year Councils', () {
+      const p = UserProfile(
+        degreeLevel: DegreeLevel.undergraduate,
+        year: 'U0',
+        faculty: 'Engineering',
+        major: undeclaredMajor,
+      );
+      expect(follows(p), {
+        'mcgill-ssmu',
+        'engineering-engineering-undergraduate-society-eus',
+        'ssmu-first-year-council',
+        'eus-junior-council',
+      });
+      // Councils are followed, not joined.
+      expect(members(p), {
+        'mcgill-ssmu',
+        'engineering-engineering-undergraduate-society-eus',
+      });
+    });
+
+    test('first-year U1 gets the council; returning U1 does not', () {
+      const firstYear = UserProfile(
+        degreeLevel: DegreeLevel.undergraduate,
+        year: 'U1',
+        firstYearAtMcGill: true,
+        faculty: 'Arts',
+        major: 'History',
+      );
+      expect(follows(firstYear), {
+        'mcgill-ssmu',
+        'mcgill-aus',
+        'ssmu-first-year-council',
+        'aus-fearc',
+      });
+      const returning = UserProfile(
+        degreeLevel: DegreeLevel.undergraduate,
+        year: 'U1',
+        faculty: 'Arts',
+        major: 'History',
+      );
+      expect(follows(returning), {'mcgill-ssmu', 'mcgill-aus'});
+    });
+
+    test('campus society depends on campus and degree', () {
+      expect(
+        follows(
+          const UserProfile(
+            degreeLevel: DegreeLevel.masters,
+            faculty: 'Science',
+            major: 'Biology',
+          ),
+        ),
+        {'mcgill-pgss'},
+      );
+      expect(
+        follows(
+          const UserProfile(
+            degreeLevel: DegreeLevel.undergraduate,
+            year: 'U2',
+            faculty: 'Agricultural & Environmental Sciences',
+            major: 'Animal Science',
+          ),
+        ),
+        {'mcgill-mcss'},
+      );
+      expect(
+        follows(
+          const UserProfile(
+            degreeLevel: DegreeLevel.exchangeOrContinuing,
+            faculty: 'Continuing Studies',
+          ),
+        ),
+        {'mcgill-maces'},
+      );
+      expect(
+        follows(
+          const UserProfile(
+            degreeLevel: DegreeLevel.professional,
+            faculty: 'Law',
+            major: 'BCL/JD',
+          ),
+        ),
+        {'mcgill-ssmu', 'mcgill-lsa'},
+      );
+    });
+
+    test('keeps clubs picked during onboarding', () {
+      final p = const UserProfile(
+        degreeLevel: DegreeLevel.undergraduate,
+        year: 'U3',
+        faculty: 'Science',
+        major: 'Biology',
+      ).withClubIds({'ssmu-mcgill-e-sports-students-society'});
+      expect(members(p), {
+        'ssmu-mcgill-e-sports-students-society',
+        'mcgill-ssmu',
+        'mcgill-sus',
+      });
+    });
+  });
+
+  group('profile load errors', () {
+    ProfileLoadProblem kind(Object e) =>
+        SupabaseBackend.describeLoadError(e).problem;
+
+    test('missing tables, functions or rules mean setup, not network', () {
+      for (final code in ['PGRST205', '42P01', 'PGRST202', '42883', '42501']) {
+        expect(
+          kind(PostgrestException(message: 'x', code: code)),
+          ProfileLoadProblem.databaseSetup,
+          reason: code,
+        );
+      }
+    });
+
+    test('expired sessions and auth errors mean signed out', () {
+      expect(
+        kind(
+          const PostgrestException(message: 'JWT expired', code: 'PGRST303'),
+        ),
+        ProfileLoadProblem.signedOut,
+      );
+      expect(kind(const AuthException('nope')), ProfileLoadProblem.signedOut);
+    });
+
+    test('only real connection failures blame the connection', () {
+      expect(
+        kind(Exception('ClientException: Failed to fetch')),
+        ProfileLoadProblem.network,
+      );
+      expect(
+        kind(const PostgrestException(message: 'boom', code: 'XX000')),
+        ProfileLoadProblem.unknown,
+      );
+    });
   });
 
   group('database value mapping', () {
@@ -275,6 +457,53 @@ void main() {
       // Back to the gate, which reloads the profile and opens the app.
       expect(find.text('gate'), findsOneWidget);
       expect(backend.profileRevision.value, 1);
+    });
+
+    testWidgets('following a club is saved to the backend', (tester) async {
+      final backend = await _pumpHome(tester);
+      await tester.enterText(find.byType(SearchBar), 'esports');
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(ClubRow),
+              matching: find.byType(FollowClubButton),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      expect(backend.clubCalls, [
+        'follow ssmu-mcgill-e-sports-students-society',
+      ]);
+    });
+
+    testWidgets('auto-followed clubs from the server show on Profile', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildMcMapTheme(),
+          home: HomePage(
+            backend: FakeBackend(),
+            profile: applyAutoFollows(_profile),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // SSMU is auto-followed, so its event sits in the followed section,
+      // above the suggestions.
+      expect(
+        tester.getTopLeft(find.text('Server Trivia Night')).dy,
+        lessThan(tester.getTopLeft(find.text('Suggested events')).dy),
+      );
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+      // U1 first-year Science: SSMU, SUS, SSMU FYC, FUSS.
+      expect(find.text('4 Following'), findsOneWidget);
+      expect(find.text('2 Club Memberships'), findsOneWidget);
     });
 
     testWidgets('feed shows server events, not sample ones', (tester) async {

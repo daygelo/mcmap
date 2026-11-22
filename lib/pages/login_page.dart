@@ -81,7 +81,6 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return AuthScaffold(
-      icon: Icons.map_rounded,
       title: 'Welcome to McMap',
       subtitle: 'Enter your McGill email to continue.',
 

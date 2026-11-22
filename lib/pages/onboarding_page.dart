@@ -80,7 +80,6 @@ class _OnboardingPageState extends State<OnboardingPage> {
   @override
   Widget build(BuildContext context) {
     return AuthScaffold(
-      icon: Icons.person_add_rounded,
       title: 'Create your account',
       subtitle: 'Create an account for ${widget.email}',
       onBack: () => Navigator.of(context).popUntil((route) => route.isFirst),

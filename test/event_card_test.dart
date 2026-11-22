@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:mcmap/data/academics.dart';
+import 'package:mcmap/models/user_profile.dart';
+import 'package:mcmap/pages/all_events_page.dart';
 import 'package:mcmap/pages/event_details_page.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/organization_page.dart';
@@ -111,6 +114,83 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ChoiceChip, 'McGillians'), findsNothing);
     expect(find.text('Suggested McGillians'), findsNothing);
+    expect(find.text('Board Game Night'), findsOneWidget);
+  });
+
+  testWidgets('no follows: only Suggested events, then View All Events', (
+    tester,
+  ) async {
+    await _pumpHome(tester);
+    // The demo profile follows nothing: no followed section or placeholder,
+    // straight into Suggested events.
+    expect(find.text('From clubs you follow'), findsNothing);
+    expect(find.textContaining('not following'), findsNothing);
+    expect(find.text('Suggested events'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Suggested events')).dy,
+      lessThan(tester.getTopLeft(find.text('Board Game Night')).dy),
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'View All Events'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AllEventsPage), findsOneWidget);
+    expect(find.text('4 of 4 events'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Froshie'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 of 4 events'), findsOneWidget);
+    expect(find.text('Frosh Week Kickoff'), findsOneWidget);
+    expect(find.text('Board Game Night'), findsNothing);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(AllEventsPage), findsNothing);
+  });
+
+  testWidgets('Home tab clears an active search, even from another tab', (
+    tester,
+  ) async {
+    await _pumpHome(tester);
+    await tester.tap(find.byType(SearchBar));
+    await tester.enterText(find.byType(SearchBar), 'photo');
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ChoiceChip, 'McGillians'), findsOneWidget);
+
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SearchBar>(find.byType(SearchBar)).controller!.text,
+      '',
+    );
+    expect(find.widgetWithText(ChoiceChip, 'McGillians'), findsNothing);
+    expect(find.text('Suggested events'), findsOneWidget);
+  });
+
+  testWidgets('followed clubs without events: section hidden, no blank card', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildMcMapTheme(),
+        home: const HomePage(
+          profile: UserProfile(
+            degreeLevel: DegreeLevel.undergraduate,
+            year: 'U2',
+            faculty: 'Science',
+            major: 'Biology',
+            // Follows SSMU, but the sample feed has no SSMU events.
+            followedClubIds: {'mcgill-ssmu'},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('From clubs you follow'), findsNothing);
+    expect(find.text('Suggested events'), findsOneWidget);
     expect(find.text('Board Game Night'), findsOneWidget);
   });
 }

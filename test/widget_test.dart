@@ -9,6 +9,7 @@ import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/widgets/profile_stats.dart';
 import 'package:mcmap/widgets/froshie_tag.dart';
+import 'package:mcmap/widgets/mcmap_logo.dart';
 
 Future<void> _goToAcademicInfo(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1200, 2400);
@@ -82,17 +83,26 @@ void main() {
 
     expect(find.text('McMap'), findsOneWidget);
     expect(find.text('Find club events'), findsOneWidget);
-    final header = tester.element(find.text('McMap'));
     final appBar = tester.widget<AppBar>(find.byType(AppBar));
-    final titleStyle = DefaultTextStyle.of(header).style;
+    final titleStyle = tester.widget<Text>(find.text('McMap')).style!;
+    expect(
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.byType(McMapLogo),
+      ),
+      findsOneWidget,
+    );
     final gear = tester.element(find.byIcon(Icons.settings_outlined));
     expect(appBar.backgroundColor, const Color(0xFFED1B2F));
     expect(titleStyle.color, McMapColors.white);
     expect(titleStyle.fontFamily, McMapFonts.serif);
     expect(titleStyle.fontSize, 26);
     expect(IconTheme.of(gear).color, McMapColors.white);
-    await _revealFeed(tester, find.text('Club events'));
-    expect(find.text('Club events'), findsOneWidget);
+    // The feed opens straight into content: no heading or helper text.
+    expect(find.text('Club events'), findsNothing);
+    expect(find.textContaining('Showing events for'), findsNothing);
+    await _revealFeed(tester, find.text('Suggested events'));
+    expect(find.text('Suggested events'), findsOneWidget);
     await _revealFeed(tester, find.text('Board Game Night'));
     expect(find.text('Board Game Night'), findsOneWidget);
     final rsvp = tester.element(
@@ -177,7 +187,14 @@ void main() {
         of: lastEvent,
         matching: find.byType(Card),
       );
-      expect(tester.getRect(feed).bottom - tester.getRect(lastCard).bottom, 24);
+      // The feed ends with "View All Events", right under the last card.
+      final viewAll = find.widgetWithText(FilledButton, 'View All Events');
+      expect(viewAll.hitTestable(), findsOneWidget);
+      expect(
+        tester.getRect(viewAll).top,
+        greaterThan(tester.getRect(lastCard).bottom),
+      );
+      expect(tester.getRect(feed).bottom - tester.getRect(viewAll).bottom, 24);
       expect(tester.takeException(), isNull);
     }
   });
@@ -350,6 +367,8 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.text('RSVP').first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('RSVP').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Map'));
@@ -423,16 +442,21 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(find.text('Coding').hitTestable(), findsOneWidget);
+    // Interests no longer show as bubbles above the feed.
+    expect(find.widgetWithText(Chip, 'Coding'), findsNothing);
     expect(find.text('Board Game Night'), findsOneWidget);
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Coding').hitTestable(), findsOneWidget);
-    await tester.tap(find.text('2 Club Memberships'));
+    // 2 picked + SSMU and EUS from auto-enrollment.
+    await tester.tap(find.text('4 Club Memberships'));
     await tester.pumpAndSettle();
     expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
     expect(find.text('Mcgill Board Game Students’ Society'), findsOneWidget);
+    expect(
+      find.text('Engineering Undergraduate Society (EUS)'),
+      findsOneWidget,
+    );
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit Profile'));
@@ -456,17 +480,17 @@ void main() {
     await tester.pumpAndSettle();
     await _skipClubs(tester);
 
-    expect(find.text('Software Engineering · Engineering'), findsOneWidget);
-    expect(
-      find.textContaining('Showing events for U2 Engineering students'),
-      findsOneWidget,
-    );
+    expect(find.text('Suggested events'), findsOneWidget);
+    expect(find.textContaining('Showing events for'), findsNothing);
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Software Engineering · U2'), findsOneWidget);
-    await tester.tap(find.text('0 Club Memberships'));
+    // U2 Engineering: auto-enrolled in SSMU and EUS, and following both.
+    expect(find.text('2 Following'), findsOneWidget);
+    await tester.tap(find.text('2 Club Memberships'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add Clubs'));
+    expect(find.text('Students’ Society of McGill University'), findsOneWidget);
+    await tester.tap(find.text('Edit Clubs'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(SearchBar), 'MESA');
     await tester.pumpAndSettle();
@@ -538,10 +562,9 @@ void main() {
     await tester.pumpAndSettle();
     await _skipClubs(tester);
 
-    expect(
-      find.text('Undeclared / Freshman Program · Science'),
-      findsOneWidget,
-    );
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Undeclared / Freshman Program · U0'), findsOneWidget);
   });
 
   testWidgets('exchange students can continue without a major', (tester) async {

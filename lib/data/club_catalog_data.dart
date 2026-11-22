@@ -75,6 +75,8 @@ const clubCatalogRows = r'''
 ssmu-961-calling|961 Calling|8|club
 ssmu-alegria-contemporary-ballet-company|Alegria Contemporary Ballet Company|4|club
 engineering-architecture-students-society-asa|Architecture Students Society (ASA)|12|studentSociety|ASA
+mcgill-aus|Arts Undergraduate Society|11|studentSociety|AUS
+mcgill-basic|Bachelor of Arts and Science Integrated Council|11|studentSociety|BASiC
 ssmu-balkan-students-society-of-mcgill|Balkan Students’ Society of McGill|10|club
 ssmu-baltic-students-society-bss|Baltic Students Society (BSS)|10|club|BSS
 ssmu-bangladesh-students-association-bsa|Bangladeshi Students Association (BSA)|10|club|BSA
@@ -129,6 +131,7 @@ ssmu-dragon-boat-z-2|Dragon Boat Z|1|club
 ssmu-dsign-lab|Dsign Lab|4|club
 desautels-dtech|DTech|13|club
 ecsess-bits|ECSESSBits|20,26|firstYearCommittee|ECSESS Bits|ECSESS First Year Council|ECSESS First Year Committee
+mcgill-edus|Education Undergraduate Society|11|studentSociety|EdUS
 ssmu-effusion-a-cappella|Effusion A Cappella|4|club
 ssmu-egyptian-students-association-2|Egyptian Students Association|10|club
 engineering-electrical-computer-software-engineering-student-society-ecsess|Electrical, Computer, & Software Engineering Student Society (ECSESS)|12|studentSociety|ECSESS
@@ -174,6 +177,7 @@ ssmu-junior-hong-kong-business-association|Junior Hong Kong Business Association
 ssmu-k-rave|K-RAVE|4|club
 ssmu-mcgill-korean-students-educational-and-cultural-association-meca|Korean Students’ Association|10|club
 ssmu-mcgill-korean-students-society|Korean Students’ Society|10|club
+mcgill-lsa|Law Students’ Association|11|studentSociety|LSA
 ssmu-lassociation-des-etudiants-francais-de-mcgill|L’Association des Étudiants Français de McGill|10|club
 ssmu-les-muses-chorales-2|Les Muses Chorale|4|club
 ssmu-lettuce-club|Lettuce Club|7,8|club
@@ -338,6 +342,7 @@ ssmu-moroccan-students-society|Moroccan Students’ Society|10|club
 ssmu-mosaica-ssmu|Mosaica Dance Company|4|club
 ssmu-multi-ethnic-student-alliance|Multi-Ethnic Student Alliance|10|club
 mus-first-year-involvement-team|MUS First-Year Involvement Team (FIT)|23|firstYearCommittee|MUS FIT|Management First-Year Team
+mcgill-musa|Music Undergraduate Students’ Association|11|studentSociety|MUSA
 ssmu-muslim-students-association-msa|Muslim Students’ Association (MSA)|10|club|MSA
 engineering-national-organization-for-business-and-engineering|National Organization for Business and Engineering|12|club
 engineering-national-society-of-black-engineers-nsbe|National Society of Black Engineers (NSBE)|12|club|NSBE
@@ -372,6 +377,7 @@ ssmu-rotaract-club-of-downtown-montreal|Rotaract Students’ Club|3|club
 ssmu-salseros-2|Salseros McGill|4|club
 ssmu-herbivore-society-for-peace-and-justice|SCALE: Student Club for Animal Liberation and Ethics|9|club
 ssmu-school-of-music-montreal-somm|School of Music Montreal (SoMM)|4|club
+mcgill-sus|Science Undergraduate Society|11|studentSociety|SUS
 ssmu-shes-the-first|She’s the First|2|club
 ssmu-simplydonate|SimplyDonate|2|club
 ssmu-sky-campus-happiness-at-mcgill|SKY Campus Happiness at McGill|5|club

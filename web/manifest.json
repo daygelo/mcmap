@@ -1,11 +1,11 @@
 {
-    "name": "mcmap",
-    "short_name": "mcmap",
+    "name": "McMap",
+    "short_name": "McMap",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "McMap",
+    "background_color": "#F8F9FA",
+    "theme_color": "#ED1B2F",
+    "description": "Discover McGill club events, connect with McGillians, and map your RSVPs.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

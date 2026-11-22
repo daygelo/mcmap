@@ -6,10 +6,12 @@ import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
+import '../data/auto_follow.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
 import '../models/club_event.dart';
 import '../services/local_rsvps.dart';
+import 'all_events_page.dart';
 import 'club_picker_page.dart';
 import 'event_details_page.dart';
 import 'organization_page.dart';
@@ -27,6 +29,7 @@ import '../social/social_graph.dart';
 import '../widgets/event_bits.dart';
 import '../widgets/froshie_tag.dart';
 import '../widgets/initials_avatar.dart';
+import '../widgets/mcmap_logo.dart';
 
 /// Quick filters under the search bar.
 enum _SearchScope {
@@ -40,7 +43,8 @@ enum _SearchScope {
 }
 
 enum _EventDiscovery {
-  all('All Events'),
+  /// Followed groups' events, then suggestions, then "View All Events".
+  forYou('For You'),
   following('Following'),
   discover('Discover Clubs');
 
@@ -122,7 +126,7 @@ class _HomePageState extends State<HomePage> {
   final _homeSearch = TextEditingController();
   final _searchFocus = FocusNode();
   String _query = '';
-  _EventDiscovery _discovery = _EventDiscovery.all;
+  _EventDiscovery _discovery = _EventDiscovery.forYou;
   _SearchScope _scope = _SearchScope.all;
   int _selectedIndex = 0;
 
@@ -144,8 +148,51 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _changeClubState(VoidCallback update) {
+    final before = _clubProfile;
     setState(update);
     _clubRevision.value++;
+    if (!identical(before, _clubProfile)) {
+      unawaited(_saveClubChanges(before, _clubProfile));
+    }
+  }
+
+  /// Sends follow / notification / membership changes to the server.
+  Future<void> _saveClubChanges(UserProfile before, UserProfile after) async {
+    final backend = widget.backend;
+    if (backend == null) return;
+    try {
+      for (final id in after.followedClubIds.difference(
+        before.followedClubIds,
+      )) {
+        await backend.setClubFollow(id, following: true);
+      }
+      for (final id in before.followedClubIds.difference(
+        after.followedClubIds,
+      )) {
+        // Unfollowing removes the row, notifications included.
+        await backend.setClubFollow(id, following: false);
+      }
+      for (final id in after.followedClubIds) {
+        final at = after.clubNotificationOptIns[id];
+        if (at != before.clubNotificationOptIns[id]) {
+          await backend.setClubNotifications(id, at);
+        }
+      }
+      for (final id in {
+        ...before.memberships.keys,
+        ...after.memberships.keys,
+      }) {
+        final membership = after.memberships[id];
+        final previous = before.memberships[id];
+        if (membership?.showOnProfile != previous?.showOnProfile ||
+            membership?.autoRsvpEnabledAt != previous?.autoRsvpEnabledAt ||
+            (membership == null) != (previous == null)) {
+          await backend.saveClubMembership(id, membership);
+        }
+      }
+    } catch (_) {
+      _showError("Couldn't save your club changes. Try again.");
+    }
   }
 
   void _toggleRsvp(ClubEvent event) {
@@ -549,12 +596,7 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: McMapColors.red,
         foregroundColor: McMapColors.white,
-        titleTextStyle: AppBarTheme.of(context).titleTextStyle?.copyWith(
-          color: McMapColors.white,
-          fontSize: 26,
-          fontWeight: FontWeight.w700,
-        ),
-        title: const Text('McMap'),
+        title: const McMapWordmark(color: McMapColors.white),
         actions: [
           IconButton(
             tooltip: 'Settings',
@@ -609,7 +651,7 @@ class _HomePageState extends State<HomePage> {
                       _query = value.trim().toLowerCase();
                       if (_query.isNotEmpty &&
                           _discovery == _EventDiscovery.discover) {
-                        _discovery = _EventDiscovery.all;
+                        _discovery = _EventDiscovery.forYou;
                       }
                     });
                   },
@@ -648,9 +690,7 @@ class _HomePageState extends State<HomePage> {
                 if (_scope == _SearchScope.all && _query.isNotEmpty)
                   ..._clubSearchResults(text),
                 if (_scope != _SearchScope.mcgillians) ...[
-                  const SizedBox(height: 24),
-                  Text('Club events', style: text.titleLarge),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
                     children: [
@@ -676,28 +716,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   if (_discovery != _EventDiscovery.discover) ...[
-                    const SizedBox(height: 8),
-                    if (widget.backend == null)
-                      Text('Sample events', style: text.bodySmall),
-                    if (widget.profile != null) ...[
-                      const SizedBox(height: 8),
-                      Text('${_profile.major} · ${_profile.faculty}'),
-                      if (_profile.interests.isEmpty)
-                        Text(
-                          'Showing events for ${_profile.year} '
-                          '${_profile.faculty} students and popular campus '
-                          'events. Add interests later from Edit Profile.',
-                        )
-                      else
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            for (final interest in _profile.interests)
-                              Chip(label: Text(interest)),
-                          ],
-                        ),
-                    ],
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     if (_loadingEvents)
                       const Padding(
                         padding: EdgeInsets.all(24),
@@ -706,14 +725,19 @@ class _HomePageState extends State<HomePage> {
                     else if (_discovery == _EventDiscovery.following &&
                         _clubProfile.followedClubIds.isEmpty)
                       const Text('Follow clubs to see their events here.')
+                    else if (_discovery == _EventDiscovery.forYou &&
+                        _query.isEmpty)
+                      ..._forYouFeed(text)
                     else if (matchingEvents.isEmpty)
                       Text(
                         _discovery == _EventDiscovery.following
                             ? 'No events from your followed clubs match right now.'
                             : 'No club events match your search.',
                       ),
-                    for (final entry in matchingEvents)
-                      _eventCard(entry.event, feedEntry: entry),
+                    if (_discovery != _EventDiscovery.forYou ||
+                        _query.isNotEmpty)
+                      for (final entry in matchingEvents)
+                        _eventCard(entry.event, feedEntry: entry),
                   ],
                 ],
               ],
@@ -879,6 +903,14 @@ class _HomePageState extends State<HomePage> {
 
   void _selectDestination(int index) {
     FocusScope.of(context).unfocus();
+    // Home always resets search: clears the query, hides the filter pills
+    // and goes back to the top of the feed, even if you're already on Home.
+    if (index == 0 && (_query.isNotEmpty || _scope != _SearchScope.all)) {
+      _closeSearch();
+      setState(() => _selectedIndex = 0);
+      _scrollHomeToTop();
+      return;
+    }
     if (index == _selectedIndex) {
       if (index == 0 && _homeScroll.hasClients) {
         unawaited(
@@ -892,6 +924,81 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     setState(() => _selectedIndex = index);
+  }
+
+  void _scrollHomeToTop() {
+    if (!_homeScroll.hasClients) return;
+    unawaited(
+      _homeScroll.animateTo(
+        _homeScroll.position.minScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      ),
+    );
+  }
+
+  /// Everything you follow or belong to counts for the "For You" feed
+  /// (including auto-followed SSMU, faculty association and FYC).
+  Set<String> get _myGroupIds => {
+    ..._clubProfile.followedClubIds,
+    ..._clubProfile.memberships.keys,
+  };
+
+  void _openAllEvents() => _openLivePage(
+    () => AllEventsPage(
+      events: _events.values,
+      buildCard: _eventCard,
+      followedClubIds: _myGroupIds,
+      faculty: _profile.faculty,
+    ),
+    route: AllEventsPage.routeName,
+  );
+
+  /// Home's default view: followed groups first, then suggestions.
+  List<Widget> _forYouFeed(TextTheme text) {
+    const suggestedPreview = 6;
+    final feed = buildHomeFeed(
+      _events.values,
+      now: DateTime.now(),
+      followedClubIds: _myGroupIds,
+      priorityClubIds: priorityClubIdsFor(_clubProfile),
+    );
+    Widget header(String title, {bool viewAll = false}) => Row(
+      children: [
+        Expanded(child: Text(title, style: text.titleLarge)),
+        if (viewAll)
+          TextButton(onPressed: _openAllEvents, child: const Text('View all')),
+      ],
+    );
+
+    return [
+      // Only when your clubs actually have events: no empty placeholder.
+      if (feed.followed.isNotEmpty) ...[
+        header('From clubs you follow'),
+        const SizedBox(height: 8),
+        for (final entry in feed.followed)
+          _eventCard(entry.event, feedEntry: entry),
+        const SizedBox(height: 12),
+        const Divider(color: McMapColors.border),
+        const SizedBox(height: 12),
+      ],
+      header('Suggested events', viewAll: true),
+      const SizedBox(height: 8),
+      if (feed.suggested.isEmpty)
+        Text(
+          'No upcoming events right now.',
+          style: text.bodyMedium?.copyWith(color: McMapColors.slate),
+        ),
+      for (final entry in feed.suggested.take(suggestedPreview))
+        _eventCard(entry.event, feedEntry: entry),
+      const SizedBox(height: 8),
+      FilledButton.icon(
+        onPressed: _openAllEvents,
+        icon: const Icon(Icons.event_note_rounded),
+        label: const Text('View All Events'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      ),
+    ];
   }
 }
 

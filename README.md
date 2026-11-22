@@ -23,10 +23,22 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      storage buckets. It also creates a profile row for any existing accounts.
    - `supabase/migrations/20261121000200_allow_encoded_group_slugs.sql`:
      lets group slugs contain `%` (one catalog ID keeps URL-encoded accents).
-3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
-   editor. It's generated from the in-app club catalog
+   - `supabase/migrations/20261122000000_group_types.sql`: adds the
+     `campus_society` and `faculty_association` group types. Run it on its
+     own (Postgres can't use new enum values in the same transaction).
+   - `supabase/migrations/20261122000100_group_follows_and_auto_follow.sql`:
+     `group_follows`, `group_memberships`, `auto_follow_rules` and the
+     trigger that applies them. Also merges the duplicate groups (`ssmu`,
+     `aus`, ...) from the first version of the seed into the catalog ones.
+   - `supabase/migrations/20261122000200_ensure_profile.sql`: makes sure
+     every account has a `profiles` row (safer signup trigger, an insert
+     policy, the `ensure_my_profile()` function the app calls when a row is
+     missing, and a backfill).
+3. Run `supabase/seed.sql` in the SQL editor. It loads every group from
+   the in-app club catalog and the automatic-follow rules (required), plus
+   demo events. It's generated
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
-   match the app's club IDs. Event dates are relative to when you run it.
+   match the app's club IDs, and it's safe to run again.
 4. Enable email/password authentication in **Authentication → Providers**.
 5. In **Authentication → URL Configuration**, configure the Site URL and redirect URLs if email confirmation is enabled.
 6. Optionally disable email confirmation for immediate account login during development.
@@ -40,10 +52,26 @@ A Flutter app with McGill email/password authentication powered by Supabase.
 - `onboarding_completed = true` → straight into the McMap app.
 
 Saved in Supabase: academic profile and interests, name/bio/photo edits
-(photos go to the `avatars` bucket under `<user id>/`), RSVPs, and
-McGillians (follow requests to private profiles stay `requested`).
-Still on-device only: club memberships, followed clubs, notification
-opt-ins and the privacy settings. Those need tables of their own.
+(photos go to the `avatars` bucket under `<user id>/`), RSVPs, McGillians
+(follow requests to private profiles stay `requested`), followed clubs,
+club notification opt-ins and club memberships. Still on-device only: the
+privacy settings.
+
+### Automatic follows
+
+When onboarding finishes, a database trigger follows the student's:
+
+- **Campus society:** SSMU (downtown undergrads, professional and exchange
+  students), MCSS (Macdonald campus), MACES (Continuing Studies) or PGSS
+  (Master's and Ph.D.).
+- **Faculty association:** AUS, SUS, EUS, MUS, EdUS, MUSA, LSA or BASiC (Arts & Science).
+- **First-Year Councils (Froshies only):** SSMU's, plus the faculty's own
+  (AUS FEARC, SUS FUSS, EUS Junior Council, MUS FIT, EdUS FYRE).
+
+Campus society and faculty association also add a private membership.
+Students can unfollow any of them. The rules live in
+`lib/data/auto_follow.dart`; the offline demo uses them directly and the
+seed copies them into `auto_follow_rules`.
 
 ### Offline demo
 
@@ -60,6 +88,18 @@ flutter run -d chrome \
 ```
 
 Never use or commit a Supabase service-role key. The publishable/anon key is intended for client applications.
+
+## Logo and app icons
+
+The McMap logo (folded campus map with a McGill-red "M" pin) is drawn in
+`lib/widgets/mcmap_logo.dart` (`McMapLogo`, `McMapWordmark`). The same
+geometry is in `assets/branding/mcmap_logo.svg`, which is also the web
+favicon (`web/favicon.svg`). After changing the logo, regenerate every
+web, Android and iOS icon PNG with:
+
+```bash
+flutter test tool/render_app_icons.dart
+```
 
 ## Development
 

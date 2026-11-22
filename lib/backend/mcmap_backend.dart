@@ -1,7 +1,8 @@
+export 'db_values.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../data/academics.dart';
 import '../models/club_event.dart';
 import '../models/student_visibility.dart';
 import '../models/user_profile.dart';
@@ -31,6 +32,34 @@ class AccountProfile {
   bool get onboardingCompleted => academics != null;
 }
 
+/// Why the signed-in profile couldn't load. AuthGate shows a different
+/// message for each instead of always blaming the connection.
+enum ProfileLoadProblem {
+  /// No connection / server unreachable. "Try again" may help.
+  network,
+
+  /// Session missing or expired. Signing in again fixes it.
+  signedOut,
+
+  /// A table, column or function the app needs doesn't exist, or a
+  /// security rule blocks it: the Supabase migrations haven't all been run.
+  databaseSetup,
+
+  unknown,
+}
+
+class ProfileLoadException implements Exception {
+  const ProfileLoadException(this.problem, this.detail);
+
+  final ProfileLoadProblem problem;
+
+  /// The underlying error, for logs and debug builds.
+  final String detail;
+
+  @override
+  String toString() => 'ProfileLoadException(${problem.name}): $detail';
+}
+
 /// Everything the app reads from or writes to the server. The app runs
 /// without one in demo mode (and in tests), using in-memory sample data.
 abstract interface class McMapBackend {
@@ -38,6 +67,8 @@ abstract interface class McMapBackend {
   /// routing (e.g. onboarding finished). AuthGate listens to it.
   ValueListenable<int> get profileRevision;
 
+  /// Loads (or creates) the signed-in user's profile. Throws
+  /// [ProfileLoadException] on failure.
   Future<AccountProfile> loadMyProfile();
 
   /// Saves onboarding steps 2–3 and marks onboarding complete.
@@ -66,6 +97,15 @@ abstract interface class McMapBackend {
   Future<FriendStatus> addMcGillian(String profileId);
   Future<void> removeMcGillian(String profileId);
 
+  // Clubs, by catalog id. Follows and memberships are independent.
+  Future<void> setClubFollow(String clubId, {required bool following});
+
+  /// Null turns event notifications off for a followed club.
+  Future<void> setClubNotifications(String clubId, DateTime? enabledAt);
+
+  /// Null removes the membership.
+  Future<void> saveClubMembership(String clubId, ClubMembership? membership);
+
   Future<void> signOut();
 }
 
@@ -83,44 +123,3 @@ class BackendScope extends InheritedWidget {
   bool updateShouldNotify(BackendScope oldWidget) =>
       backend != oldWidget.backend;
 }
-
-// ---------------------------------------------------------------------------
-// App ↔ database value mapping
-// ---------------------------------------------------------------------------
-
-const degreeLevelDbValues = {
-  DegreeLevel.undergraduate: 'undergraduate',
-  DegreeLevel.masters: 'masters',
-  DegreeLevel.doctorate: 'doctorate',
-  DegreeLevel.professional: 'professional',
-  DegreeLevel.exchangeOrContinuing: 'exchange_continuing',
-};
-
-DegreeLevel? degreeLevelFromDb(Object? value) => degreeLevelDbValues.entries
-    .where((e) => e.value == value)
-    .map((e) => e.key)
-    .firstOrNull;
-
-/// 'U4+' ↔ 'U4_plus'; other U-years are the same.
-String? uYearToDb(String? year) => year == 'U4+' ? 'U4_plus' : year;
-String? uYearFromDb(Object? value) =>
-    value == 'U4_plus' ? 'U4+' : value as String?;
-
-/// Edit Profile's single "Year / degree level" value → (degree, U-year).
-(DegreeLevel, String?) standingToDb(String standing) {
-  if (academicYears.contains(standing)) {
-    return (DegreeLevel.undergraduate, standing);
-  }
-  final level = DegreeLevel.values.firstWhere(
-    (l) => l.shortLabel == standing,
-    orElse: () => DegreeLevel.undergraduate,
-  );
-  return (level, level.hasUYear ? 'U0' : null);
-}
-
-String visibilityToDb(StudentVisibility v) => v.name;
-StudentVisibility visibilityFromDb(Object? value) =>
-    StudentVisibility.values.firstWhere(
-      (v) => v.name == value,
-      orElse: () => StudentVisibility.private,
-    );

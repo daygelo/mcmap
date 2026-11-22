@@ -63,7 +63,6 @@ class _WelcomeBackPageState extends State<WelcomeBackPage> {
   @override
   Widget build(BuildContext context) {
     return AuthScaffold(
-      icon: Icons.lock_outline_rounded,
       title: 'Welcome back',
       subtitle: 'Enter the password for ${widget.email}',
       onBack: () => Navigator.of(context).popUntil((route) => route.isFirst),

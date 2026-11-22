@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -133,8 +134,14 @@ class _AuthGateState extends State<AuthGate> {
     return FutureBuilder(
       future: _account,
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
+        if (snapshot.error case final error?) {
           return _ProfileError(
+            error: error is ProfileLoadException
+                ? error
+                : ProfileLoadException(
+                    ProfileLoadProblem.unknown,
+                    error.toString(),
+                  ),
             onRetry: _reload,
             onSignOut: widget.backend.signOut,
           );
@@ -161,21 +168,69 @@ class _AuthGateState extends State<AuthGate> {
 }
 
 class _ProfileError extends StatelessWidget {
-  const _ProfileError({required this.onRetry, required this.onSignOut});
+  const _ProfileError({
+    required this.error,
+    required this.onRetry,
+    required this.onSignOut,
+  });
 
+  final ProfileLoadException error;
   final VoidCallback onRetry;
   final Future<void> Function() onSignOut;
 
   @override
   Widget build(BuildContext context) {
+    final (icon, title, subtitle) = switch (error.problem) {
+      ProfileLoadProblem.network => (
+        Icons.cloud_off_rounded,
+        "Couldn't reach McMap",
+        'Check your connection and try again.',
+      ),
+      ProfileLoadProblem.signedOut => (
+        Icons.lock_clock_outlined,
+        'Your session expired',
+        'Sign in again to continue.',
+      ),
+      ProfileLoadProblem.databaseSetup => (
+        Icons.build_circle_outlined,
+        "McMap's database isn't fully set up",
+        'Some tables or functions are missing. Run every file in '
+            'supabase/migrations (in order) in the Supabase SQL editor, '
+            'then try again.',
+      ),
+      ProfileLoadProblem.unknown => (
+        Icons.error_outline_rounded,
+        "Couldn't load your profile",
+        'Something went wrong on our side. Try again in a moment.',
+      ),
+    };
     return AuthScaffold(
-      icon: Icons.cloud_off_rounded,
-      title: "Couldn't load your profile",
-      subtitle: 'Check your connection and try again.',
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
       children: [
-        FilledButton(onPressed: onRetry, child: const Text('Try again')),
-        const SizedBox(height: 8),
-        TextButton(onPressed: onSignOut, child: const Text('Sign out')),
+        if (error.problem != ProfileLoadProblem.signedOut) ...[
+          FilledButton(onPressed: onRetry, child: const Text('Try again')),
+          const SizedBox(height: 8),
+        ],
+        TextButton(
+          onPressed: onSignOut,
+          child: Text(
+            error.problem == ProfileLoadProblem.signedOut
+                ? 'Sign in again'
+                : 'Sign out',
+          ),
+        ),
+        // The real error, for whoever is running a debug build.
+        if (kDebugMode) ...[
+          const SizedBox(height: 16),
+          SelectableText(
+            error.detail,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: McMapColors.slate),
+          ),
+        ],
       ],
     );
   }

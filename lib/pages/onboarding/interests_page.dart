@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../backend/mcmap_backend.dart';
+import '../../data/auto_follow.dart';
 import '../../data/interests.dart';
 import '../../models/user_profile.dart';
 import '../../theme/app_theme.dart';
@@ -58,9 +59,11 @@ class _InterestsPageState extends State<InterestsPage> {
       return;
     }
 
-    // Offline demo: go straight to the app.
+    // Offline demo: apply the automatic follows here (Supabase does it in a
+    // trigger) and go straight to the app.
+    final demoProfile = applyAutoFollows(profile);
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => HomePage(profile: profile)),
+      MaterialPageRoute(builder: (_) => HomePage(profile: demoProfile)),
       (_) => false,
     );
   }

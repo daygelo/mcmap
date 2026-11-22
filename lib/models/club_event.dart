@@ -9,6 +9,7 @@ class ClubEvent {
     this.isFrosh = false,
     this.clubId,
     this.publishedAt,
+    this.createdAt,
     this.startsAt,
     this.description,
     this.synopsis,
@@ -28,6 +29,10 @@ class ClubEvent {
   final bool isFrosh;
   final String? clubId;
   final DateTime? publishedAt;
+
+  /// When the organizer created the event (`events.created_at`). The feed
+  /// shows the newest first.
+  final DateTime? createdAt;
   final DateTime? startsAt;
   final String? description;
 

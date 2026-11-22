@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -32,13 +34,208 @@ class SupabaseBackend implements McMapBackend {
 
   @override
   Future<AccountProfile> loadMyProfile() async {
-    final row = await client.from('profiles').select().eq('id', _uid).single();
-    return _account(row);
+    try {
+      final uid = _uid;
+      var row = await client
+          .from('profiles')
+          .select()
+          .eq('id', uid)
+          .maybeSingle();
+      if (row == null) {
+        // E.g. an account created before the profiles table existed. Create
+        // a starter row (onboarding_completed = false) → onboarding.
+        debugPrint('McMap: no profiles row for $uid yet; creating one.');
+        row = Map<String, dynamic>.from(
+          await client.rpc('ensure_my_profile') as Map,
+        );
+      }
+      final (followed, optIns, memberships) = await _loadClubs(uid);
+      return _account(
+        row,
+        followed: followed,
+        optIns: optIns,
+        memberships: memberships,
+      );
+    } catch (error, stack) {
+      final problem = describeLoadError(error);
+      debugPrint('McMap: loading the profile failed ($problem): $error');
+      if (kDebugMode) debugPrint('$stack');
+      throw problem;
+    }
+  }
+
+  /// Club follows and memberships. If those tables aren't set up yet (their
+  /// migration hasn't been run), the profile still loads, without clubs.
+  Future<(Set<String>, Map<String, DateTime>, Map<String, ClubMembership>)>
+  _loadClubs(String uid) async {
+    try {
+      final (follows, memberships) = await (
+        client
+            .from('group_follows')
+            .select('notifications_enabled_at, groups(id, slug)')
+            .eq('profile_id', uid),
+        client
+            .from('group_memberships')
+            .select('show_on_profile, auto_rsvp_enabled_at, groups(id, slug)')
+            .eq('profile_id', uid),
+      ).wait;
+      String slug(Map<String, dynamic> r) {
+        final group = r['groups'] as Map<String, dynamic>;
+        _groupIds[group['slug'] as String] = group['id'] as String;
+        return group['slug'] as String;
+      }
+
+      DateTime? time(Object? value) =>
+          value == null ? null : DateTime.parse(value as String);
+      return (
+        {for (final r in follows) slug(r)},
+        {
+          for (final r in follows)
+            slug(r): ?time(r['notifications_enabled_at']),
+        },
+        {
+          for (final r in memberships)
+            slug(r): ClubMembership(
+              showOnProfile: r['show_on_profile'] == true,
+              autoRsvpEnabledAt: time(r['auto_rsvp_enabled_at']),
+            ),
+        },
+      );
+    } catch (error) {
+      final inner = error is ParallelWaitError ? error.errors : error;
+      if (describeLoadError(_firstError(inner)).problem !=
+          ProfileLoadProblem.databaseSetup) {
+        rethrow;
+      }
+      debugPrint(
+        'McMap: club follows/memberships unavailable (run migration '
+        '20261122000100_group_follows_and_auto_follow.sql): $error',
+      );
+      return (<String>{}, <String, DateTime>{}, <String, ClubMembership>{});
+    }
+  }
+
+  static Object _firstError(Object error) {
+    if (error is ParallelWaitError) return _firstError(error.errors);
+    if (error is (AsyncError?, AsyncError?)) {
+      return (error.$1 ?? error.$2)?.error ?? error;
+    }
+    return error;
+  }
+
+  /// Sorts a failure into network / signed out / database setup / unknown,
+  /// so the app can say what's actually wrong.
+  static ProfileLoadException describeLoadError(Object error) {
+    error = _firstError(error);
+    final text = error.toString();
+    if (error is ProfileLoadException) return error;
+    if (error is AuthException) {
+      return ProfileLoadException(ProfileLoadProblem.signedOut, text);
+    }
+    if (error is PostgrestException) {
+      final detail = '${error.code}: ${error.message}';
+      return switch (error.code) {
+        // JWT missing / expired.
+        'PGRST301' ||
+        'PGRST303' ||
+        '28000' => ProfileLoadException(ProfileLoadProblem.signedOut, detail),
+        // Missing table, column or function; blocked by a security rule.
+        'PGRST205' ||
+        '42P01' ||
+        'PGRST202' ||
+        '42883' ||
+        'PGRST204' ||
+        '42703' ||
+        '42501' => ProfileLoadException(
+          ProfileLoadProblem.databaseSetup,
+          detail,
+        ),
+        _ => ProfileLoadException(ProfileLoadProblem.unknown, detail),
+      };
+    }
+    // The HTTP client's errors differ by platform (ClientException,
+    // SocketException, "Failed to fetch" on web), so match by text.
+    if (RegExp(
+      'ClientException|SocketException|Failed to fetch|XMLHttpRequest|'
+      'TimeoutException|Connection (refused|reset|closed)|host lookup',
+    ).hasMatch(text)) {
+      return ProfileLoadException(ProfileLoadProblem.network, text);
+    }
+    return ProfileLoadException(ProfileLoadProblem.unknown, text);
+  }
+
+  // -------------------------------------------------------------------------
+  // Clubs: follows and memberships (keyed by catalog id = groups.slug)
+  // -------------------------------------------------------------------------
+
+  final _groupIds = <String, String>{};
+
+  Future<String> _groupId(String slug) async {
+    final cached = _groupIds[slug];
+    if (cached != null) return cached;
+    final row = await client
+        .from('groups')
+        .select('id')
+        .eq('slug', slug)
+        .single();
+    return _groupIds[slug] = row['id'] as String;
+  }
+
+  @override
+  Future<void> setClubFollow(String clubId, {required bool following}) async {
+    final groupId = await _groupId(clubId);
+    if (following) {
+      await client.from('group_follows').upsert({
+        'profile_id': _uid,
+        'group_id': groupId,
+      }, ignoreDuplicates: true);
+    } else {
+      await client
+          .from('group_follows')
+          .delete()
+          .eq('profile_id', _uid)
+          .eq('group_id', groupId);
+    }
+  }
+
+  @override
+  Future<void> setClubNotifications(String clubId, DateTime? enabledAt) async {
+    await client
+        .from('group_follows')
+        .update({
+          'notifications_enabled_at': enabledAt?.toUtc().toIso8601String(),
+        })
+        .eq('profile_id', _uid)
+        .eq('group_id', await _groupId(clubId));
+  }
+
+  @override
+  Future<void> saveClubMembership(
+    String clubId,
+    ClubMembership? membership,
+  ) async {
+    final groupId = await _groupId(clubId);
+    if (membership == null) {
+      await client
+          .from('group_memberships')
+          .delete()
+          .eq('profile_id', _uid)
+          .eq('group_id', groupId);
+    } else {
+      await client.from('group_memberships').upsert({
+        'profile_id': _uid,
+        'group_id': groupId,
+        'show_on_profile': membership.showOnProfile,
+        'auto_rsvp_enabled_at': membership.autoRsvpEnabledAt
+            ?.toUtc()
+            .toIso8601String(),
+      });
+    }
   }
 
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
-    await client
+    final saved = await client
         .from('profiles')
         .update({
           ..._academicColumns(
@@ -51,7 +248,18 @@ class SupabaseBackend implements McMapBackend {
           'interests': profile.interests.toList(),
           'onboarding_completed': true,
         })
-        .eq('id', _uid);
+        .eq('id', _uid)
+        .select('id');
+    if (saved.isEmpty) {
+      // No row matched, so nothing was saved: don't pretend it worked.
+      throw StateError('No profiles row to save onboarding to.');
+    }
+    // The database trigger adds the automatic follows (SSMU, faculty
+    // association, First-Year Council). Clubs picked in onboarding:
+    for (final MapEntry(key: clubId, value: membership)
+        in profile.memberships.entries) {
+      await saveClubMembership(clubId, membership);
+    }
     _profileRevision.value++;
   }
 
@@ -114,7 +322,7 @@ class SupabaseBackend implements McMapBackend {
     final rows = await client
         .from('events')
         .select('*, groups(slug, name, avatar_url)')
-        .order('starts_at', ascending: true, nullsFirst: false)
+        .order('created_at', ascending: false)
         .limit(500);
     return [for (final row in rows) _event(row)];
   }
@@ -199,7 +407,12 @@ class SupabaseBackend implements McMapBackend {
   // Row → model
   // -------------------------------------------------------------------------
 
-  AccountProfile _account(Map<String, dynamic> row) {
+  AccountProfile _account(
+    Map<String, dynamic> row, {
+    Set<String> followed = const {},
+    Map<String, DateTime> optIns = const {},
+    Map<String, ClubMembership> memberships = const {},
+  }) {
     final degree = degreeLevelFromDb(row['degree_level']);
     final faculty = row['faculty'] as String?;
     final done = row['onboarding_completed'] == true;
@@ -220,6 +433,9 @@ class SupabaseBackend implements McMapBackend {
               interests: Set.unmodifiable(
                 (row['interests'] as List? ?? const []).cast<String>(),
               ),
+              followedClubIds: Set.unmodifiable(followed),
+              clubNotificationOptIns: Map.unmodifiable(optIns),
+              memberships: Map.unmodifiable(memberships),
             ),
     );
   }
@@ -239,6 +455,7 @@ class SupabaseBackend implements McMapBackend {
       clubAvatarUrl: group?['avatar_url'] as String?,
       isFrosh: row['is_froshie_event'] == true,
       publishedAt: time('published_at'),
+      createdAt: time('created_at'),
       startsAt: time('starts_at'),
       description: row['full_description'] as String?,
       synopsis: row['ai_synopsis'] as String?,

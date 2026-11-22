@@ -71,7 +71,17 @@ List<ClubFeedEntry> buildClubEventFeed(
       ),
     );
   }
-  entries.sort((a, b) => compare(a.event, b.event));
+  // Newest created first; events with no creation time (samples) come
+  // after, and ties fall back to the schedule order.
+  entries.sort((a, b) {
+    final aNew = a.event.createdAt ?? a.event.publishedAt;
+    final bNew = b.event.createdAt ?? b.event.publishedAt;
+    if (aNew != null && bNew != null && aNew != bNew) {
+      return bNew.compareTo(aNew);
+    }
+    if ((aNew == null) != (bNew == null)) return aNew == null ? 1 : -1;
+    return compare(a.event, b.event);
+  });
   return entries;
 }
 
@@ -119,4 +129,74 @@ int _priority(ClubEvent event, DateTime now) {
   if (event.cancelled) return 3;
   if (event.startsAt == null) return 1;
   return event.isUpcomingAt(now) ? 0 : 2;
+}
+
+/// The Home tab's "For You" feed: events from groups you follow or belong
+/// to (only shown when there are some), then suggested events from
+/// everyone else.
+class HomeFeed {
+  const HomeFeed({required this.followed, required this.suggested});
+
+  /// Newest created first.
+  final List<ClubFeedEntry> followed;
+
+  /// Your campus society, faculty association and (for Froshies) First-Year
+  /// Councils first, then everything else; newest created first within each.
+  final List<ClubFeedEntry> suggested;
+}
+
+HomeFeed buildHomeFeed(
+  Iterable<ClubEvent> events, {
+  required DateTime now,
+  required Set<String> followedClubIds,
+  Set<String> priorityClubIds = const {},
+}) {
+  // Already newest-first.
+  final entries = buildClubEventFeed(events, now: now, query: '');
+  String? idOf(ClubFeedEntry e) => e.club?.id ?? e.event.clubId;
+  final followed = <ClubFeedEntry>[];
+  final priority = <ClubFeedEntry>[];
+  final rest = <ClubFeedEntry>[];
+  for (final entry in entries) {
+    final id = idOf(entry);
+    if (id != null && followedClubIds.contains(id)) {
+      followed.add(entry);
+    } else if (id != null && priorityClubIds.contains(id)) {
+      priority.add(entry);
+    } else {
+      rest.add(entry);
+    }
+  }
+  return HomeFeed(followed: followed, suggested: [...priority, ...rest]);
+}
+
+/// "Engineering" matches clubs in the Engineering catalog category, events
+/// tagged `engineering`, or organizers named after the faculty.
+bool eventMatchesFaculty(ClubEvent event, String faculty) {
+  if (faculty.isEmpty) return false;
+  // "Desautels Management" → "desautels"; "Arts & Science" → "arts".
+  final key = faculty.toLowerCase().split(RegExp(r'[\s&]+')).first;
+  final category = clubsById[event.clubId]?.category.toLowerCase() ?? '';
+  return category.contains(key) ||
+      event.tags.any((t) => t.toLowerCase().contains(key)) ||
+      event.club.toLowerCase().contains(key);
+}
+
+/// Every listed event across campus, one card per event, newest created
+/// first ("View All Events").
+List<ClubEvent> allCampusEvents(Iterable<ClubEvent> events, DateTime now) {
+  final listed = [
+    for (final (i, e) in events.indexed)
+      if (e.isListedAt(now)) (e, i),
+  ];
+  listed.sort((a, b) {
+    final aNew = a.$1.createdAt ?? a.$1.publishedAt;
+    final bNew = b.$1.createdAt ?? b.$1.publishedAt;
+    if (aNew != null && bNew != null && aNew != bNew) {
+      return bNew.compareTo(aNew);
+    }
+    if ((aNew == null) != (bNew == null)) return aNew == null ? 1 : -1;
+    return a.$2.compareTo(b.$2);
+  });
+  return [for (final (e, _) in listed) e];
 }

@@ -256,7 +256,7 @@ void main() {
     },
   );
 
-  testWidgets('Home re-tap animates to the top and keeps the search query', (
+  testWidgets('Home re-tap animates to the top and clears the search', (
     tester,
   ) async {
     await _start(tester);
@@ -275,10 +275,12 @@ void main() {
     expect(scroll.position.pixels, inExclusiveRange(0, offset));
     await tester.pumpAndSettle();
     expect(scroll.position.pixels, 0);
+    // Home resets search: empty query, filter pills hidden, back to the feed.
     expect(
       tester.widget<SearchBar>(find.byType(SearchBar)).controller!.text,
-      'science',
+      '',
     );
+    expect(find.widgetWithText(ChoiceChip, 'McGillians'), findsNothing);
     expect(find.text('Find club events').hitTestable(), findsOneWidget);
   });
 
@@ -453,7 +455,7 @@ void main() {
         lessThan(tester.getTopLeft(section).dy),
       );
       expect(
-        tester.getBottomLeft(find.text('Club events')).dy,
+        tester.getBottomLeft(find.text('Discover Clubs')).dy,
         lessThan(tester.getTopLeft(section).dy),
       );
       await _search(tester, 'photo');
@@ -769,7 +771,7 @@ void main() {
     expect(find.text('Coding night').hitTestable(), findsNothing);
     expect(find.text('Campus Coding Meetup').hitTestable(), findsNothing);
     expect(find.text('Cancel RSVP').hitTestable(), findsOneWidget);
-    await _tapText(tester, 'All Events');
+    await _tapText(tester, 'For You');
     expect(find.text('Coding night').hitTestable(), findsOneWidget);
     expect(find.text('Campus Coding Meetup').hitTestable(), findsOneWidget);
 

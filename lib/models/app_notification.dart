@@ -33,23 +33,35 @@ class AppNotification {
   final String title;
   final String body;
 
-  /// McGillians going when a deadline reminder was written.
+  /// McGillians whose attendance was visible when the inbox was loaded.
   final int friendRsvpCount;
   final bool isRead;
   final DateTime createdAt;
 
-  AppNotification asRead() => isRead
-      ? this
-      : AppNotification(
-          id: id,
-          type: type,
-          eventId: eventId,
-          groupName: groupName,
-          groupAvatarUrl: groupAvatarUrl,
-          title: title,
-          body: body,
-          friendRsvpCount: friendRsvpCount,
-          isRead: true,
-          createdAt: createdAt,
-        );
+  AppNotification asRead() => withReadState(true);
+
+  AppNotification withReadState(bool read) =>
+      isRead == read ? this : _copy(isRead: read);
+
+  AppNotification withoutAttendance() =>
+      type == AppNotificationType.eventDeadlineSoon && friendRsvpCount > 0
+      ? _copy(
+          body: 'An event’s RSVP deadline is coming up.',
+          friendRsvpCount: 0,
+        )
+      : this;
+
+  AppNotification _copy({bool? isRead, String? body, int? friendRsvpCount}) =>
+      AppNotification(
+        id: id,
+        type: type,
+        eventId: eventId,
+        groupName: groupName,
+        groupAvatarUrl: groupAvatarUrl,
+        title: title,
+        body: body ?? this.body,
+        friendRsvpCount: friendRsvpCount ?? this.friendRsvpCount,
+        isRead: isRead ?? this.isRead,
+        createdAt: createdAt,
+      );
 }

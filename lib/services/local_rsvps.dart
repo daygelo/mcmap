@@ -19,6 +19,10 @@ class LocalRsvps {
       ..addAll(saved);
   }
 
+  void applyVisibility(StudentVisibility visibility) {
+    _decisions.updateAll((_, current) => current == null ? null : visibility);
+  }
+
   /// Puts back a decision after a failed save.
   void set(String eventId, StudentVisibility? visibility) {
     _decisions.remove(eventId);
@@ -34,6 +38,7 @@ class LocalRsvps {
     ClubEvent event,
     OrganizationPreferences profile, {
     required DateTime now,
+    StudentVisibility visibility = StudentVisibility.private,
   }) {
     if (!profile.followedClubIds.contains(event.clubId)) return;
     final enabledAt = profile.clubAutoRsvpOptIns[event.clubId];
@@ -44,13 +49,12 @@ class LocalRsvps {
         !publishedAt.isAfter(enabledAt) ||
         publishedAt.isAfter(now) ||
         startsAt == null ||
-        !startsAt.isAfter(now) ||
+        !event.canRsvpAt(now) ||
         event.cancelled ||
         !event.supportsUnrestrictedRsvp) {
       return;
     }
 
-    // Private until the authenticated backend supports a separate consent.
-    _decisions.putIfAbsent(event.id, () => StudentVisibility.private);
+    _decisions.putIfAbsent(event.id, () => visibility);
   }
 }

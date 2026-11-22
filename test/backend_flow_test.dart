@@ -45,12 +45,20 @@ class FakeBackend implements McMapBackend {
   final added = <String>[];
   final removed = <String>[];
   bool failRsvp = false;
+  bool failRsvpPrivacy = false;
+  Completer<void>? pendingRsvpPrivacy;
+  int privacyWrites = 0;
+  StudentVisibility rsvpPrivacy = StudentVisibility.private;
+  final savedRsvps = <String, StudentVisibility>{};
+  final visibleProfileEvents = <String, List<ClubEvent>>{};
+  final visibleAttendees = <String, List<RsvpFriend>>{};
   bool failFollowSave = false;
   Exception? followLoadError;
   Future<Map<String, DateTime?>> Function()? followLoader;
   int followWrites = 0;
   int autoRsvpWrites = 0;
   final follows = <String, DateTime?>{};
+  final notificationOptIns = <String, DateTime>{};
   List<PublishingGroup> publishingGroups = [];
   Completer<void>? publicationPending;
   int publicationCalls = 0;
@@ -94,8 +102,27 @@ class FakeBackend implements McMapBackend {
   ValueListenable<int> get profileRevision => _revision;
 
   @override
-  Future<AccountProfile> loadMyProfile() async =>
-      const AccountProfile(id: 'me', handle: 'me', fullName: 'Me');
+  Future<Map<String, DateTime>> fetchOrganizationNotificationOptIns() async => {
+    ...notificationOptIns,
+  };
+
+  @override
+  Future<DateTime?> setOrganizationNotifications(
+    String id,
+    bool enabled,
+  ) async {
+    if (enabled) return notificationOptIns.putIfAbsent(id, DateTime.now);
+    notificationOptIns.remove(id);
+    return null;
+  }
+
+  @override
+  Future<AccountProfile> loadMyProfile() async => AccountProfile(
+    id: 'me',
+    handle: 'me',
+    fullName: 'Me',
+    rsvpVisibility: rsvpPrivacy,
+  );
 
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
@@ -120,6 +147,7 @@ class FakeBackend implements McMapBackend {
       follows.putIfAbsent(id, () => null);
     } else {
       follows.remove(id);
+      notificationOptIns.remove(id);
     }
   }
 
@@ -188,7 +216,9 @@ class FakeBackend implements McMapBackend {
   }
 
   @override
-  Future<Map<String, StudentVisibility>> fetchMyRsvps() async => {};
+  Future<Map<String, StudentVisibility>> fetchMyRsvps() async => {
+    ...savedRsvps,
+  };
 
   Map<String, FriendRsvps> friendRsvps = const {};
   int friendRsvpLoads = 0;
@@ -235,10 +265,44 @@ class FakeBackend implements McMapBackend {
   Stream<void> watchNotifications() => notificationChanges.stream;
 
   @override
-  Future<void> setRsvp(String eventId, StudentVisibility? visibility) async {
+  Future<StudentVisibility?> setRsvp(
+    String eventId, {
+    required bool going,
+  }) async {
+    final visibility = going ? rsvpPrivacy : null;
     rsvpCalls.add((eventId, visibility));
     if (failRsvp) throw Exception('offline');
+    if (visibility == null) {
+      savedRsvps.remove(eventId);
+    } else {
+      savedRsvps[eventId] = visibility;
+    }
+    return visibility;
   }
+
+  @override
+  Future<StudentVisibility> setRsvpVisibility(
+    StudentVisibility visibility,
+  ) async {
+    privacyWrites++;
+    await pendingRsvpPrivacy?.future;
+    if (failRsvpPrivacy) throw Exception('offline');
+    rsvpPrivacy = visibility;
+    savedRsvps.updateAll((_, _) => visibility);
+    return visibility;
+  }
+
+  @override
+  Future<McGillian?> fetchMcGillian(String profileId) async =>
+      [priya, sam].where((student) => student.id == profileId).firstOrNull;
+
+  @override
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId) async =>
+      visibleProfileEvents[profileId] ?? const [];
+
+  @override
+  Future<List<RsvpFriend>> fetchEventAttendees(String eventId) async =>
+      visibleAttendees[eventId] ?? const [];
 
   @override
   Future<List<McGillian>> searchMcGillians(String query) async => [
@@ -1394,6 +1458,86 @@ void main() {
       expect(find.text('Cancel RSVP'), findsOneWidget);
       expect(find.textContaining("Couldn't save your RSVP"), findsOneWidget);
     });
+
+    testWidgets(
+      'global RSVP privacy confirms, saves, rolls back, and reloads',
+      (tester) async {
+        final backend = await _pumpHome(tester);
+        const secondId = 'e2';
+        backend.events.add(
+          ClubEvent(
+            secondId,
+            'Second Server Event',
+            'SSMU',
+            '',
+            'Campus',
+            startsAt: DateTime.now().add(const Duration(days: 3)),
+          ),
+        );
+        Future<void> tap(Finder finder) async {
+          await tester.tap(finder);
+          await tester.pumpAndSettle();
+        }
+
+        StudentVisibility? selected() => tester
+            .widget<RadioGroup<StudentVisibility>>(
+              find.byType(RadioGroup<StudentVisibility>),
+            )
+            .groupValue;
+
+        await tap(find.text('RSVP'));
+        expect(backend.savedRsvps, {'e1': StudentVisibility.private});
+        await tap(find.byTooltip('Settings'));
+        expect(selected(), StudentVisibility.private);
+
+        backend.pendingRsvpPrivacy = Completer<void>();
+        await tap(find.text('Friends'));
+        expect(selected(), StudentVisibility.private);
+        expect(backend.privacyWrites, 1);
+        await tap(find.text('Public'));
+        expect(backend.privacyWrites, 1);
+
+        backend.pendingRsvpPrivacy!.complete();
+        await tester.pumpAndSettle();
+        expect(selected(), StudentVisibility.friends);
+        expect(backend.savedRsvps, {'e1': StudentVisibility.friends});
+
+        await tap(find.text('Public'));
+        expect(find.text('Make all RSVPs public?'), findsOneWidget);
+        await tap(find.text('Cancel'));
+        expect(backend.privacyWrites, 1);
+        expect(selected(), StudentVisibility.friends);
+
+        backend.failRsvpPrivacy = true;
+        await tap(find.text('Public'));
+        await tap(find.text('Make public'));
+        expect(selected(), StudentVisibility.friends);
+        expect(backend.savedRsvps, {'e1': StudentVisibility.friends});
+        expect(
+          find.textContaining("Couldn't confirm your RSVP privacy"),
+          findsOneWidget,
+        );
+
+        backend.failRsvpPrivacy = false;
+        await tap(find.text('Public'));
+        await tap(find.text('Make public'));
+        expect(selected(), StudentVisibility.public);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _pumpHome(tester, existingBackend: backend);
+        await tap(find.byTooltip('Settings'));
+        expect(selected(), StudentVisibility.public);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(find.text('Cancel RSVP'), findsOneWidget);
+        await tap(find.text('RSVP'));
+        expect(backend.savedRsvps, {
+          'e1': StudentVisibility.public,
+          secondId: StudentVisibility.public,
+        });
+        expect(backend.rsvpCalls.length, 2);
+      },
+    );
 
     testWidgets('McGillians come from the server and sync changes', (
       tester,

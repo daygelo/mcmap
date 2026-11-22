@@ -60,18 +60,27 @@ class NotificationCenter extends ChangeNotifier {
   /// Has the server write any reminders that are due, then loads the list.
   Future<void> refresh() async {
     final backend = _backend;
-    if (backend == null) return;
+    if (backend == null || _disposed) return;
+    final load = ++_loads;
+    _hideStaleAttendance();
     try {
       await backend.refreshNotifications();
     } catch (_) {
       // The scheduled job writes them too; the list below says if we're offline.
     }
-    await _load();
+    if (!_disposed && load == _loads) await _load();
+  }
+
+  void _hideStaleAttendance() {
+    if (_items.every((item) => item.friendRsvpCount == 0)) return;
+    _items = [for (final item in _items) item.withoutAttendance()];
+    notifyListeners();
   }
 
   Future<void> _load() async {
     if (_disposed) return;
     final load = ++_loads;
+    _hideStaleAttendance();
     try {
       final items = await _backend!.fetchNotifications();
       if (_disposed || load != _loads) return;
@@ -98,7 +107,6 @@ class NotificationCenter extends ChangeNotifier {
         if (ids.contains(item.id)) item.id,
     };
     if (changed.isEmpty) return;
-    final before = {for (final item in _items) item.id: item};
     _readHere.addAll(changed);
     _items = [
       for (final item in _items)
@@ -110,7 +118,7 @@ class NotificationCenter extends ChangeNotifier {
       _readHere.removeAll(changed);
       _items = [
         for (final item in _items)
-          changed.contains(item.id) ? before[item.id] ?? item : item,
+          changed.contains(item.id) ? item.withReadState(false) : item,
       ];
       notifyListeners();
       onSaveFailed?.call();

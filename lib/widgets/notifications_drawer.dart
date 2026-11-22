@@ -1,10 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../models/app_notification.dart';
-import '../models/friend_rsvps.dart';
 import '../services/notification_center.dart';
 import '../theme/app_theme.dart';
-import 'friend_rsvp_pill.dart';
 import 'initials_avatar.dart';
 
 /// Side panel behind the bell: unread notifications, then read ones.
@@ -12,14 +10,10 @@ class NotificationsDrawer extends StatelessWidget {
   const NotificationsDrawer({
     super.key,
     required this.center,
-    required this.friendRsvps,
     required this.onOpen,
   });
 
   final NotificationCenter center;
-
-  /// Who's going, for the photos in a reminder's pill.
-  final FriendRsvps Function(String eventId) friendRsvps;
 
   /// Opens the notification's event.
   final ValueChanged<AppNotification> onOpen;
@@ -115,7 +109,6 @@ class NotificationsDrawer extends StatelessWidget {
                             _NotificationTile(
                               item,
                               now: now,
-                              friendRsvps: friendRsvps(item.eventId),
                               onTap: () => onOpen(item),
                             ),
                         ],
@@ -132,16 +125,10 @@ class NotificationsDrawer extends StatelessWidget {
 }
 
 class _NotificationTile extends StatelessWidget {
-  const _NotificationTile(
-    this.item, {
-    required this.now,
-    required this.friendRsvps,
-    required this.onTap,
-  });
+  const _NotificationTile(this.item, {required this.now, required this.onTap});
 
   final AppNotification item;
   final DateTime now;
-  final FriendRsvps friendRsvps;
   final VoidCallback onTap;
 
   @override
@@ -186,19 +173,6 @@ class _NotificationTile extends StatelessWidget {
                           color: unread ? McMapColors.ink : McMapColors.slate,
                         ),
                       ),
-                      if (deadline && item.friendRsvpCount > 0) ...[
-                        const SizedBox(height: 8),
-                        // The count the message gives, with today's faces.
-                        FriendRsvpPill(
-                          FriendRsvps(
-                            count: item.friendRsvpCount,
-                            friends: friendRsvps.friends
-                                .take(item.friendRsvpCount)
-                                .toList(),
-                          ),
-                          background: McMapColors.white,
-                        ),
-                      ],
                       const SizedBox(height: 4),
                       Text(
                         notificationAge(item.createdAt, now),

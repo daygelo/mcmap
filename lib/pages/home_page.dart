@@ -118,7 +118,14 @@ class _HomePageState extends State<HomePage> {
 
   late OrganizationPreferences _clubProfile =
       widget.profile ?? const OrganizationPreferences();
-  final _rsvpVisibility = ValueNotifier(StudentVisibility.private);
+  late final _rsvpVisibility = ValueNotifier(
+    widget.account?.rsvpVisibility ?? StudentVisibility.private,
+  );
+  final _pendingRsvps = <String>{};
+  bool _savingRsvpVisibility = false;
+  bool _loadingAttendance = false;
+  bool _reloadAttendance = false;
+  int _attendanceWrites = 0;
   late StudentProfile _profile = switch (widget.profile) {
     final profile? => StudentProfile(
       name: switch (widget.account?.fullName.trim()) {
@@ -202,32 +209,116 @@ class _HomePageState extends State<HomePage> {
     _clubRevision.value++;
   }
 
-  void _toggleRsvp(ClubEvent event) {
+  Future<void> _toggleRsvp(ClubEvent event) async {
     final current = _events[event.id] ?? event;
-    if (_rsvps.visibilityFor(event.id) == null &&
-        !current.canRsvpAt(DateTime.now())) {
+    final previous = _rsvps.visibilityFor(event.id);
+    if (_savingRsvpVisibility ||
+        (previous == null && !current.canRsvpAt(DateTime.now())) ||
+        !_pendingRsvps.add(event.id)) {
       return;
     }
-    final previous = _rsvps.visibilityFor(event.id);
+    _attendanceWrites++;
     _changeClubState(() => _rsvps.toggle(event.id, _rsvpVisibility.value));
-    final backend = widget.backend;
-    if (backend == null) return;
-    backend.setRsvp(event.id, _rsvps.visibilityFor(event.id)).catchError((
-      Object _,
-    ) {
+    try {
+      final backend = widget.backend;
+      if (backend == null) return;
+      final saved = await backend.setRsvp(event.id, going: previous == null);
+      if (!mounted) return;
+      _changeClubState(() => _rsvps.set(event.id, saved));
+      if (saved != null && saved != _rsvpVisibility.value) {
+        _reloadAttendance = true;
+      }
+      _social.refreshAttendance();
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.refresh());
+    } catch (_) {
       if (!mounted) return;
       _changeClubState(() => _rsvps.set(event.id, previous));
-      _showError("Couldn't save your RSVP. Try again.");
-    });
+      _showError(
+        "Couldn't save your RSVP. Check your connection and try again.",
+      );
+    } finally {
+      _pendingRsvps.remove(event.id);
+      if (mounted && _reloadAttendance && _pendingRsvps.isEmpty) {
+        unawaited(_refreshAttendance());
+      }
+    }
+  }
+
+  Future<void> _saveRsvpVisibility(StudentVisibility selection) async {
+    if (_savingRsvpVisibility || _pendingRsvps.isNotEmpty) {
+      throw StateError('An RSVP is still being saved');
+    }
+    _savingRsvpVisibility = true;
+    _attendanceWrites++;
+    try {
+      final saved =
+          await (widget.backend?.setRsvpVisibility(selection) ??
+              Future.value(selection));
+      if (!mounted) return;
+      _changeClubState(() {
+        _rsvpVisibility.value = saved;
+        _rsvps.applyVisibility(saved);
+      });
+      _social.refreshAttendance();
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.refresh());
+    } finally {
+      _savingRsvpVisibility = false;
+      if (mounted && widget.backend != null) unawaited(_refreshAttendance());
+    }
+  }
+
+  Future<void> _refreshAttendance() async {
+    final backend = widget.backend;
+    if (backend == null || !mounted) return;
+    if (_loadingAttendance ||
+        _savingRsvpVisibility ||
+        _pendingRsvps.isNotEmpty) {
+      _reloadAttendance = true;
+      return;
+    }
+    _reloadAttendance = false;
+    _loadingAttendance = true;
+    final revision = _attendanceWrites;
+    try {
+      final (account, rsvps) = await (
+        backend.loadMyProfile(),
+        backend.fetchMyRsvps(),
+      ).wait;
+      if (!mounted) return;
+      if (revision != _attendanceWrites ||
+          _savingRsvpVisibility ||
+          _pendingRsvps.isNotEmpty) {
+        _reloadAttendance = true;
+        return;
+      }
+      _changeClubState(() {
+        _rsvpVisibility.value = account.rsvpVisibility;
+        _rsvps.restore(rsvps);
+      });
+    } catch (_) {
+      // Keep the last confirmed state and retry when the app resumes.
+    } finally {
+      _loadingAttendance = false;
+      if (mounted &&
+          _reloadAttendance &&
+          !_savingRsvpVisibility &&
+          _pendingRsvps.isEmpty) {
+        unawaited(_refreshAttendance());
+      }
+    }
   }
 
   Future<bool> _loadOrganizationFollows(McMapBackend backend) async {
     try {
       final follows = await backend.fetchOrganizationFollows();
+      final notifications = await backend.fetchOrganizationNotificationOptIns();
       if (!mounted) return false;
       _changeClubState(() {
         _clubProfile = _clubProfile.copyWith(
           followedClubIds: follows.keys.toSet(),
+          clubNotificationOptIns: notifications,
           clubAutoRsvpOptIns: {
             for (final entry in follows.entries) entry.key: ?entry.value,
           },
@@ -356,18 +447,36 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _setNotifications(String id, bool enabled) {
-    if (!_clubProfile.followedClubIds.contains(id)) return;
-    final optIns = {..._clubProfile.clubNotificationOptIns};
-    if (enabled) {
-      optIns.putIfAbsent(id, DateTime.now);
-    } else {
-      optIns.remove(id);
+  Future<void> _setNotifications(String id, bool enabled) async {
+    if (!_clubProfile.followedClubIds.contains(id) ||
+        !_pendingOrganizationChanges.add(id)) {
+      return;
     }
-    _changeClubState(
-      () =>
-          _clubProfile = _clubProfile.copyWith(clubNotificationOptIns: optIns),
-    );
+    try {
+      final backend = widget.backend;
+      final consent = backend == null || _usingLocalOrganizationFollows
+          ? (enabled ? DateTime.now() : null)
+          : await backend.setOrganizationNotifications(id, enabled);
+      if (!mounted) return;
+      final optIns = {..._clubProfile.clubNotificationOptIns};
+      if (consent == null) {
+        optIns.remove(id);
+      } else {
+        optIns[id] = consent;
+      }
+      _changeClubState(
+        () => _clubProfile = _clubProfile.copyWith(
+          clubNotificationOptIns: optIns,
+        ),
+      );
+    } catch (_) {
+      _showError(
+        "Couldn't save event notifications. Check your connection and try again.",
+      );
+    } finally {
+      _pendingOrganizationChanges.remove(id);
+      if (mounted) _clubRevision.value++;
+    }
   }
 
   @override
@@ -378,11 +487,18 @@ class _HomePageState extends State<HomePage> {
       _showError("Couldn't update your McGillians.");
     };
     _social.addListener(_onSocialChanged);
-    _social.onConnectionsSaved = _loadFriendRsvps;
+    _social.onOpenEvent = _openEvent;
+    _social.onConnectionsSaved = () {
+      _social.refreshAttendance();
+      unawaited(_loadFriendRsvps());
+      unawaited(_notifications.refresh());
+    };
     _notifications.onSaveFailed = () =>
         _showError("Couldn't mark that as read. Try again.");
     _lifecycle = AppLifecycleListener(
       onResume: () {
+        _social.refreshAttendance();
+        unawaited(_refreshAttendance());
         unawaited(_notifications.refresh());
         unawaited(_loadFriendRsvps());
       },
@@ -390,6 +506,7 @@ class _HomePageState extends State<HomePage> {
     _listenForPublications();
     if (widget.backend case final backend?) {
       unawaited(_loadFromServer());
+      unawaited(_refreshAttendance());
       unawaited(_loadFriendRsvps());
       unawaited(_notifications.start());
       _organizationFollowsLoad = _loadOrganizationFollows(backend);
@@ -458,7 +575,8 @@ class _HomePageState extends State<HomePage> {
       if (!mounted || load != _friendRsvpLoads) return;
       _changeClubState(() => _friendRsvps = rsvps);
     } catch (_) {
-      // Events are still useful without it; it loads again on return.
+      if (!mounted || load != _friendRsvpLoads) return;
+      _changeClubState(() => _friendRsvps = const {});
     }
   }
 
@@ -473,7 +591,11 @@ class _HomePageState extends State<HomePage> {
     final going = [
       for (final student in _social.connections)
         if (_sampleFriendRsvps[event.id]?.contains(student.handle) ?? false)
-          RsvpFriend(name: student.name, avatarUrl: student.avatarUrl),
+          RsvpFriend(
+            name: student.name,
+            avatarUrl: student.avatarUrl,
+            profileId: student.handle,
+          ),
     ];
     return FriendRsvps(count: going.length, friends: going.take(3).toList());
   }
@@ -502,11 +624,7 @@ class _HomePageState extends State<HomePage> {
     final backend = widget.backend!;
     setState(() => _loadingEvents = true);
     try {
-      final (events, rsvps) = await (
-        backend.fetchEvents(),
-        backend.fetchMyRsvps(),
-        _social.load(),
-      ).wait.then((r) => (r.$1, r.$2));
+      final (events, _) = await (backend.fetchEvents(), _social.load()).wait;
       if (!mounted) return;
       _changeClubState(() {
         _events
@@ -514,7 +632,6 @@ class _HomePageState extends State<HomePage> {
           ..addEntries(events.map((e) => MapEntry(e.id, e)))
           ..addAll(_publishedDuringLoad);
         _publishedDuringLoad.clear();
-        _rsvps.restore(rsvps);
         _loadingEvents = false;
       });
     } catch (error) {
@@ -523,7 +640,7 @@ class _HomePageState extends State<HomePage> {
         _loadingEvents = false;
         _publishedDuringLoad.clear();
       });
-      _showError("Couldn't load events. Pull to refresh or try again later.");
+      _showError("Couldn't load events. Use Refresh to try again.");
     }
   }
 
@@ -610,8 +727,16 @@ class _HomePageState extends State<HomePage> {
           );
         }
         _events[event.id] = event;
-        _rsvps.onPublished(event, _clubProfile, now: now);
+        if (widget.backend == null) {
+          _rsvps.onPublished(
+            event,
+            _clubProfile,
+            now: now,
+            visibility: _rsvpVisibility.value,
+          );
+        }
       });
+      if (widget.backend != null) unawaited(_refreshAttendance());
     });
   }
 
@@ -633,9 +758,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// [route] names the screen (e.g. `/events/:id`) for future deep links.
-  void _openPage(BuildContext context, Widget page, {String? route}) {
+  Future<void> _openPage(BuildContext context, Widget page, {String? route}) {
     FocusScope.of(context).unfocus();
-    Navigator.of(context).push<void>(
+    return Navigator.of(context).push<void>(
       MaterialPageRoute(
         settings: RouteSettings(name: route),
         builder: (_) => InheritedTheme.captureAll(context, page),
@@ -732,6 +857,8 @@ class _HomePageState extends State<HomePage> {
       onFollow: () => _toggleFollow(id),
       autoRsvp: _clubProfile.clubAutoRsvpOptIns.containsKey(id),
       onAutoRsvp: _autoRsvpAction(id),
+      notifications: _clubProfile.clubNotificationOptIns.containsKey(id),
+      onNotifications: (enabled) => _setNotifications(id, enabled),
     ),
     route: OrganizationPage.routeFor(id),
   );
@@ -750,18 +877,64 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openEvent(ClubEvent event) => _openLivePage(() {
-    final current = _events[event.id] ?? event;
-    return EventDetailsPage(
-      event: current,
-      isGoing: _rsvps.visibilityFor(current.id) != null,
-      canRsvp: current.canRsvpAt(DateTime.now()),
-      recommended: current.isFrosh && _profile.isFroshie,
-      onRsvp: () => _toggleRsvp(current),
-      onOpenClub: current.club.isEmpty ? null : () => _openOrganizer(current),
-      friendRsvps: _friendRsvpsFor(current),
+  Future<void> _openRsvpFriend(String profileId) async {
+    await _openPage(
+      context,
+      McGillianProfilePage(graph: _social, profileId: profileId),
     );
-  }, route: EventDetailsPage.routeFor(event.id));
+    if (!mounted) return;
+    await _loadFriendRsvps();
+  }
+
+  Future<void> _refreshFeed() async {
+    _social.refreshAttendance();
+    await Future.wait([
+      _loadFromServer(),
+      _refreshAttendance(),
+      _loadFriendRsvps(),
+      _notifications.refresh(),
+    ]);
+  }
+
+  void _openEvent(ClubEvent event) {
+    unawaited(_loadFriendRsvps());
+    unawaited(
+      _openPage(
+        context,
+        ValueListenableBuilder(
+          valueListenable: _social.attendanceRevision,
+          builder: (_, _, _) {
+            final attendance = widget.backend?.fetchEventAttendees(event.id);
+            return ValueListenableBuilder(
+              valueListenable: _clubRevision,
+              builder: (_, _, _) {
+                final current = _events[event.id] ?? event;
+                return EventDetailsPage(
+                  event: current,
+                  isGoing: _rsvps.visibilityFor(current.id) != null,
+                  canRsvp: current.canRsvpAt(DateTime.now()),
+                  recommended: current.isFrosh && _profile.isFroshie,
+                  onRsvp: () => _toggleRsvp(current),
+                  onOpenClub: current.club.isEmpty
+                      ? null
+                      : () => _openOrganizer(current),
+                  friendRsvps: _friendRsvpsFor(current),
+                  onFriendTap: _openRsvpFriend,
+                  attendees: attendance,
+                );
+              },
+            );
+          },
+        ),
+        route: EventDetailsPage.routeFor(event.id),
+      ).then((_) {
+        if (!mounted) return;
+        _social.refreshAttendance();
+        unawaited(_loadFriendRsvps());
+        unawaited(_refreshAttendance());
+      }),
+    );
+  }
 
   Widget _eventCard(
     ClubEvent event, {
@@ -780,6 +953,7 @@ class _HomePageState extends State<HomePage> {
       feedEntry: feedEntry,
       previewLabel: _query.isEmpty ? 'Next event' : 'Matching event',
       friendRsvps: _friendRsvpsFor(event),
+      onFriendTap: _openRsvpFriend,
       onRsvp: () => _toggleRsvp(event),
       showOrganizer: !insideClub,
       onOpenDetails: () => _openEvent(event),
@@ -898,8 +1072,11 @@ class _HomePageState extends State<HomePage> {
           );
     final going = [
       for (final decision in _rsvps.decisions)
-        if (decision.value case final visibility?)
-          (_events[decision.key]!, visibility),
+        if ((_events[decision.key], decision.value) case (
+          final event?,
+          final visibility?,
+        ))
+          (event, visibility),
     ];
 
     final selectedIndex = _destinations.indexOf(_destination);
@@ -907,10 +1084,6 @@ class _HomePageState extends State<HomePage> {
       key: _scaffold,
       endDrawer: NotificationsDrawer(
         center: _notifications,
-        friendRsvps: (id) => switch (_events[id]) {
-          final event? => _friendRsvpsFor(event),
-          null => FriendRsvps.none,
-        },
         onOpen: _openNotification,
       ),
       // Dragging from the edge would fight with the map.
@@ -943,7 +1116,11 @@ class _HomePageState extends State<HomePage> {
             tooltip: 'Settings',
             onPressed: () => _openPage(
               context,
-              SettingsPage(rsvpVisibility: _rsvpVisibility),
+              SettingsPage(
+                rsvpVisibility: _rsvpVisibility,
+                onSave: _saveRsvpVisibility,
+                demo: widget.backend == null,
+              ),
             ),
             icon: const Icon(Icons.settings_outlined),
           ),
@@ -1027,7 +1204,20 @@ class _HomePageState extends State<HomePage> {
                   ..._clubSearchResults(text),
                 if (_scope != _SearchScope.mcgillians) ...[
                   const SizedBox(height: 24),
-                  Text('Club events', style: text.titleLarge),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text('Club events', style: text.titleLarge),
+                      ),
+                      if (widget.backend != null)
+                        IconButton(
+                          tooltip: 'Refresh events and attendance',
+                          onPressed: _loadingEvents ? null : _refreshFeed,
+                          icon: const Icon(Icons.refresh),
+                        ),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -1408,6 +1598,7 @@ class _EventCard extends StatelessWidget {
     required this.previewLabel,
     required this.showOrganizer,
     this.friendRsvps = FriendRsvps.none,
+    this.onFriendTap,
     this.feedEntry,
     this.visibility,
     this.onOpenDetails,
@@ -1432,6 +1623,7 @@ class _EventCard extends StatelessWidget {
 
   /// Your McGillians going.
   final FriendRsvps friendRsvps;
+  final ValueChanged<String>? onFriendTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1528,7 +1720,7 @@ class _EventCard extends StatelessWidget {
               ],
               if (friendRsvps.count > 0) ...[
                 const SizedBox(height: 10),
-                FriendRsvpPill(friendRsvps),
+                FriendRsvpPill(friendRsvps, onFriendTap: onFriendTap),
               ],
               if (visibility case final audience?)
                 Text('Going · Demo visibility: ${audience.label}'),

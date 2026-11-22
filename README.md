@@ -33,9 +33,9 @@ A Flutter app with McGill email/password authentication powered by Supabase.
      the first seed's SSMU, PGSS, EUS and MUS into their catalog groups, moving
      events, RSVPs, publishers and follows. Running an older `seed.sql`
      afterwards would add the duplicates back.
-   - `supabase/migrations/20261122110000_notifications.sql`: adds
-     `events.rsvp_deadline`, friend RSVP counts and `notifications`. Run it
-     last; see [Notifications](#notifications).
+   - Apply organizer onboarding, then the notifications, notification privacy,
+     and global RSVP privacy migrations in timestamp order.
+     See [Notifications and RSVP privacy](#notifications-and-rsvp-privacy).
 3. Optionally load demo groups and events: run `supabase/seed.sql` in the SQL
    editor. It's generated from the in-app club catalog
    (`dart run tool/generate_seed.dart > supabase/seed.sql`), so group slugs
@@ -58,8 +58,8 @@ A Flutter app with McGill email/password authentication powered by Supabase.
 Saved in Supabase: academic profile and interests, name/bio/photo edits
 (photos go to the `avatars` bucket under `<user id>/`), RSVPs, and
 McGillians (follow requests to private profiles stay `requested`).
-Organization follows are also saved after the migration below. Event notification
-opt-ins and the default RSVP audience remain session preferences.
+Organization follows, event notification opt-ins, and account-wide RSVP privacy
+are saved in Supabase after the migrations below.
 
 ### Offline demo
 
@@ -176,15 +176,11 @@ follow row and keyed by the same stable group slug used in events. Enabling
 records the server timestamp. Disabling or unfollowing removes it without
 changing RSVP history. Offline preferences are session-only.
 
-The local publication stream demonstrates private automatic RSVPs. Production
-background automation is pending. A server-side publication worker needs to
-process newly visible events, check exact group identity and consent time,
-require explicit unrestricted eligibility, and atomically preserve manual
-RSVP and cancellation decisions with one durable record per user and event.
-Persist cancellations so a replay cannot recreate an RSVP. The migration
-defaults new events to ineligible until the publication source explicitly
-marks them unrestricted. Existing eligibility flags should be audited before
-a live worker consumes them.
+The app processes opted-in auto-RSVPs on sign-in and attendance refresh.
+The server checks that the event was published after consent, is upcoming and
+open for RSVPs, and is explicitly eligible for unrestricted RSVPs. Auto-RSVPs
+use the account-wide RSVP preference. A durable record keeps manual cancellations
+from being recreated on refresh. Offline demo decisions last for the session.
 
 With the migrations applied to a local Supabase instance, run the preference
 and authorization test:
@@ -202,36 +198,44 @@ without changing those fields. Home keeps club relationships in that model
 and keeps editable presentation fields, including image bytes, in Gabby's
 `StudentProfile`. Suggestions read the live edited academic labels and
 interests from the presentation. Friend requests and connections remain in
-`SocialGraph` and are separate from follows. The original profile statistics
-remain in place, with the organization Following count below the profile header.
+`SocialGraph` and are separate from organization follows. Other students’ profiles
+show upcoming RSVP events visible to the signed-in viewer.
 
-## Notifications
+## Notifications and RSVP privacy
 
-The bell in the app bar lists `public.notifications`, one per student, kind and
-event. Until the migration is run the bell stays empty and event cards show no
-friend counts.
+The bell in the app bar reads `public.notification_inbox`, backed by one
+notification per student, kind, and event. Apply
+`20261122110000_notifications.sql`, `20261122110100_notification_rsvp_privacy.sql`,
+and `20261122110200_global_rsvp_privacy.sql` after organizer onboarding.
+Deadline reminders calculate friend counts as the recipient reads them.
 
-- **New events.** A trigger on `events` notifies everyone following the group
-  (`profile_organization_follows`) except the organizer. Scheduled publications
-  are announced once they become visible.
-- **Deadlines.** `generate_ending_soon_notifications()` reminds followers who
-  haven't RSVPed when `coalesce(rsvp_deadline, starts_at)` is within 24 hours.
+- **New events.** A trigger on `events` notifies followers who explicitly enabled
+  event notifications before publication, excluding the organizer. Scheduled
+  publications are announced once they become visible.
+- **Deadlines.** `generate_ending_soon_notifications()` reminds opted-in followers
+  who haven't RSVPed when `coalesce(rsvp_deadline, starts_at)` is within 24 hours.
   The migration schedules it every 15 minutes if `pg_cron` is available. The app
   also calls `refresh_my_notifications()`, which covers only the caller, on
   load, on resume and when the bell is opened.
 - **Live updates** use Supabase Realtime. The migration adds the table to the
   `supabase_realtime` publication.
 
-Friend counts (`friend_rsvps()`) include McGillians the student follows whose
-RSVP is visible to **Friends** or **Public**. RSVPs are private by default, and
-private ones never count. `publish_event` does not set `rsvp_deadline` yet, so
+RSVP privacy applies to all existing and future RSVPs, including auto-RSVPs.
+Private RSVPs are visible to their owner. Friends RSVPs require confirmed
+McGillian follows in both directions. Public RSVPs are visible to signed-in
+users who can see the event. Friend counts include eligible mutual McGillians
+only. Profile discoverability is separate and defaults to public for new
+accounts. The migration initializes existing accounts’ RSVP preferences and rows
+to Private because the app previously stored no durable account-wide choice.
+Existing RSVP timestamps and profile visibility are preserved.
+
 RSVPs close at the start time unless a deadline is set in the database.
 
 With the migrations applied to a local Supabase instance:
 
 ```bash
 psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
-  -f supabase/tests/notifications.sql
+  -f supabase/tests/notifications.sql -f supabase/tests/global_rsvp_privacy.sql
 ```
 
 ## Event publishing

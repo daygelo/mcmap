@@ -92,8 +92,7 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
     _profileRevision.value++;
   }
 
-  @override
-  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+  Future<Map<String, dynamic>> _loadFollows() async {
     final uid = _uid;
     if (_onboardingSessionFollows.containsKey(uid)) {
       throw const OrganizationFollowsUnavailable();
@@ -110,8 +109,12 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
       }
       rethrow;
     }
-    final follows =
-        rows.firstOrNull?['follows'] as Map<String, dynamic>? ?? const {};
+    return rows.firstOrNull?['follows'] as Map<String, dynamic>? ?? const {};
+  }
+
+  @override
+  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+    final follows = await _loadFollows();
     return {
       for (final entry in follows.entries)
         entry.key: switch (entry.value) {
@@ -121,6 +124,30 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
           _ => null,
         },
     };
+  }
+
+  @override
+  Future<Map<String, DateTime>> fetchOrganizationNotificationOptIns() async {
+    final follows = await _loadFollows();
+    return {
+      for (final entry in follows.entries)
+        if (entry.value case {
+          'event_notifications_enabled_at': final String value,
+        })
+          entry.key: ?DateTime.tryParse(value),
+    };
+  }
+
+  @override
+  Future<DateTime?> setOrganizationNotifications(
+    String id,
+    bool enabled,
+  ) async {
+    final consent = await client.rpc<String?>(
+      'set_organization_event_notifications',
+      params: {'group_slug': id, 'enabled': enabled},
+    );
+    return consent == null ? null : DateTime.parse(consent);
   }
 
   @visibleForTesting
@@ -432,6 +459,14 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
 
   @override
   Future<Map<String, StudentVisibility>> fetchMyRsvps() async {
+    try {
+      await client.rpc<void>('refresh_my_auto_rsvps');
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202' ||
+          !error.message.contains('public.refresh_my_auto_rsvps')) {
+        rethrow;
+      }
+    }
     final rows = await client
         .from('event_rsvps')
         .select('event_id, visibility')
@@ -443,20 +478,90 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
   }
 
   @override
-  Future<void> setRsvp(String eventId, StudentVisibility? visibility) async {
-    if (visibility == null) {
+  Future<StudentVisibility> setRsvpVisibility(
+    StudentVisibility visibility,
+  ) async => visibilityFromDb(
+    await client.rpc<String>(
+      'set_my_rsvp_visibility',
+      params: {'preference': visibilityToDb(visibility)},
+    ),
+  );
+
+  @override
+  Future<StudentVisibility?> setRsvp(
+    String eventId, {
+    required bool going,
+  }) async {
+    final uid = _uid;
+    if (!going) {
       await client
           .from('event_rsvps')
           .delete()
           .eq('event_id', eventId)
-          .eq('profile_id', _uid);
-    } else {
-      await client.from('event_rsvps').upsert({
-        'event_id': eventId,
-        'profile_id': _uid,
-        'visibility': visibilityToDb(visibility),
-      });
+          .eq('profile_id', uid);
+      return null;
     }
+    final inserted = await client
+        .from('event_rsvps')
+        .upsert({
+          'event_id': eventId,
+          'profile_id': uid,
+        }, ignoreDuplicates: true)
+        .select('visibility')
+        .maybeSingle();
+    final row =
+        inserted ??
+        await client
+            .from('event_rsvps')
+            .select('visibility')
+            .eq('event_id', eventId)
+            .eq('profile_id', uid)
+            .single();
+    return visibilityFromDb(row['visibility']);
+  }
+
+  @override
+  Future<McGillian?> fetchMcGillian(String profileId) async {
+    final row = await client
+        .from('profiles')
+        .select()
+        .eq('id', profileId)
+        .eq('onboarding_completed', true)
+        .maybeSingle();
+    return row == null ? null : _mcgillian(row);
+  }
+
+  @override
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId) async {
+    final rows = await client
+        .from('event_rsvps')
+        .select('events!inner($_eventColumns)')
+        .eq('profile_id', profileId)
+        .eq('events.cancelled', false)
+        .gte('events.starts_at', DateTime.now().toUtc().toIso8601String());
+    return [
+      for (final row in rows) _event(row['events'] as Map<String, dynamic>),
+    ]..sort((a, b) => a.startsAt!.compareTo(b.startsAt!));
+  }
+
+  @override
+  Future<List<RsvpFriend>> fetchEventAttendees(String eventId) async {
+    final rows = await client
+        .from('event_rsvps')
+        .select('profile_id, profiles!inner(full_name, avatar_url)')
+        .eq('event_id', eventId)
+        .neq('profile_id', _uid)
+        .eq('profiles.onboarding_completed', true)
+        .order('created_at')
+        .limit(30);
+    return [
+      for (final row in rows)
+        RsvpFriend(
+          profileId: row['profile_id'] as String,
+          name: (row['profiles']['full_name'] as String? ?? '').trim(),
+          avatarUrl: row['profiles']['avatar_url'] as String?,
+        ),
+    ];
   }
 
   @override
@@ -475,10 +580,8 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
           friends: [
             for (final friend in row['friend_rsvps'] as List? ?? const [])
               RsvpFriend(
-                name: switch ((friend['full_name'] as String?)?.trim()) {
-                  final name? when name.isNotEmpty => name,
-                  _ => 'McMap Student',
-                },
+                profileId: friend['profile_id'] as String?,
+                name: (friend['full_name'] as String? ?? '').trim(),
                 avatarUrl: friend['avatar_url'] as String?,
               ),
           ],
@@ -497,8 +600,8 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
     final List<Map<String, dynamic>> rows;
     try {
       rows = await client
-          .from('notifications')
-          .select('*, groups(name, avatar_url)')
+          .from('notification_inbox')
+          .select()
           .eq('user_id', _uid)
           .order('created_at', ascending: false)
           .limit(_maxNotifications);
@@ -513,8 +616,8 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
             id: row['id'] as String,
             type: type,
             eventId: row['event_id'] as String,
-            groupName: row['groups']?['name'] as String? ?? '',
-            groupAvatarUrl: row['groups']?['avatar_url'] as String?,
+            groupName: row['group_name'] as String? ?? '',
+            groupAvatarUrl: row['group_avatar_url'] as String?,
             title: row['title'] as String,
             body: row['body'] as String,
             friendRsvpCount: (row['friend_rsvp_count'] as num).toInt(),
@@ -571,7 +674,9 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
   bool _isMissingNotifications(PostgrestException error) =>
       switch (error.code) {
         'PGRST202' => error.message.contains('public.friend_rsvps'),
-        'PGRST205' => error.message.contains("'public.notifications'"),
+        'PGRST205' =>
+          error.message.contains("'public.notifications'") ||
+              error.message.contains("'public.notification_inbox'"),
         _ => false,
       };
 
@@ -642,6 +747,7 @@ class SupabaseBackend implements McMapBackend, OrganizerBackend {
       avatarUrl: row['avatar_url'] as String?,
       bio: row['bio'] as String? ?? '',
       onboardingCompleted: done,
+      rsvpVisibility: visibilityFromDb(row['rsvp_visibility']),
       academics: !done || degree == null || faculty == null
           ? null
           : UserProfile(

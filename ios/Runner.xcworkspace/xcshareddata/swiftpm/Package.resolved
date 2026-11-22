@@ -1,8 +1,5 @@
 {
-<<<<<<< HEAD
   "originHash" : "4ac7adf69d58051d369f9008c10e76edaa235fc30202cd048810fa4c3bcba669",
-=======
->>>>>>> origin/expirementalmapfeaturesbygab
   "pins" : [
     {
       "identity" : "mapbox-common-ios",
@@ -41,9 +38,5 @@
       }
     }
   ],
-<<<<<<< HEAD
   "version" : 3
-=======
-  "version" : 2
->>>>>>> origin/expirementalmapfeaturesbygab
 }

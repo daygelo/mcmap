@@ -13,6 +13,7 @@ import 'package:mcmap/data/academics.dart';
 import 'package:mcmap/models/app_notification.dart';
 import 'package:mcmap/models/club_event.dart';
 import 'package:mcmap/models/friend_rsvps.dart';
+import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/models/user_profile.dart';
 import 'package:mcmap/pages/event_details_page.dart';
 import 'package:mcmap/pages/home_page.dart';
@@ -105,11 +106,7 @@ void main() {
         tester,
         const FriendRsvps(count: 1, friends: [RsvpFriend(name: 'Ana Lee')]),
       );
-      expect(find.text('1 McGillian going'), findsOneWidget);
-      expect(
-        find.bySemanticsLabel('1 McGillian going: Ana Lee'),
-        findsOneWidget,
-      );
+      expect(find.text("Ana Lee RSVP'd for this event"), findsOneWidget);
       expect(find.byType(CircleAvatar), findsOneWidget);
 
       await pump(
@@ -123,11 +120,8 @@ void main() {
           ],
         ),
       );
-      expect(find.text('5 McGillians going'), findsOneWidget);
       expect(
-        find.bySemanticsLabel(
-          '5 McGillians going: Ana Lee, Ben Roy, Cam Wu and 2 more',
-        ),
+        find.text("Ana Lee, Ben Roy and 3 others RSVP'd for this event"),
         findsOneWidget,
       );
       expect(find.byType(CircleAvatar), findsNWidgets(3));
@@ -151,15 +145,94 @@ void main() {
       expect(
         find.descendant(
           of: _card('Server Trivia Night'),
-          matching: find.text('2 McGillians going'),
+          matching: find.text("Priya Server and 1 other RSVP'd for this event"),
         ),
         findsOneWidget,
       );
       await tester.tap(find.text('Server Trivia Night').first);
       await tester.pumpAndSettle();
       expect(find.byType(EventDetailsPage), findsOneWidget);
-      expect(find.text('2 McGillians going'), findsOneWidget);
+      expect(
+        find.text("Priya Server and 1 other RSVP'd for this event"),
+        findsOneWidget,
+      );
     });
+
+    testWidgets(
+      'same named friend is linked from feeds to the profile and event',
+      (tester) async {
+        const friend = RsvpFriend(name: 'Priya Server', profileId: 'p-priya');
+        final backend = FakeBackend()
+          ..follows['ssmu'] = null
+          ..friendRsvps = const {
+            'e1': FriendRsvps(count: 1, friends: [friend]),
+          };
+        backend.visibleProfileEvents['p-priya'] = [backend.events.single];
+        await _pumpHome(tester, backend);
+
+        final title = find.text('Server Trivia Night');
+        Finder namedFriend() => find.descendant(
+          of: _card('Server Trivia Night'),
+          matching: find.text('Priya Server'),
+        );
+        Future<void> tap(Finder finder) async {
+          await tester.ensureVisible(finder.first);
+          await tester.tap(finder.first);
+          await tester.pumpAndSettle();
+        }
+
+        expect(namedFriend(), findsOneWidget);
+
+        await tap(find.text('View All Events'));
+        expect(namedFriend(), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        await tap(find.widgetWithText(ChoiceChip, 'Following'));
+        expect(namedFriend(), findsOneWidget);
+        await tester.enterText(find.byType(SearchBar), 'trivia');
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pumpAndSettle();
+        expect(namedFriend(), findsOneWidget);
+
+        await tap(title);
+        expect(find.byType(EventDetailsPage), findsOneWidget);
+        await tap(find.text('Priya Server'));
+        expect(find.byType(McGillianProfilePage), findsOneWidget);
+        expect(find.text("Events they're going to"), findsOneWidget);
+        expect(find.text('Priya Server'), findsOneWidget);
+        expect(find.textContaining('SSMU Ballroom'), findsOneWidget);
+        await tap(title);
+        expect(find.byType(EventDetailsPage), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        backend.visibleProfileEvents.clear();
+        await tap(find.byTooltip('Refresh visible events'));
+        expect(title, findsNothing);
+        expect(
+          find.text('No upcoming RSVP events are visible to you.'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'visible non-friends appear in event details without a friend count',
+      (tester) async {
+        final backend = FakeBackend()
+          ..visibleAttendees['e1'] = const [
+            RsvpFriend(name: 'Sam Private', profileId: 'p-sam'),
+          ];
+        await _pumpHome(tester, backend);
+        expect(find.byType(FriendRsvpPill), findsNothing);
+        await tester.tap(find.text('Server Trivia Night'));
+        await tester.pumpAndSettle();
+        expect(find.text('Visible attendees'), findsOneWidget);
+        expect(find.text('Sam Private'), findsOneWidget);
+        expect(find.byType(FriendRsvpPill), findsNothing);
+      },
+    );
 
     testWidgets('are hidden at zero and for past and cancelled events', (
       tester,
@@ -210,7 +283,7 @@ void main() {
       expect(backend.friendRsvpLoads, before + 1);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(find.text('1 McGillian going'), findsOneWidget);
+      expect(find.text("1 McGillian RSVP'd for this event"), findsOneWidget);
     });
 
     testWidgets('follow your connections in the offline demo', (tester) async {
@@ -220,8 +293,7 @@ void main() {
         matching: find.byType(FriendRsvpPill),
       );
       expect(pill('Board Game Night'), findsOneWidget);
-      expect(find.text('3 McGillians going'), findsOneWidget);
-      expect(find.text('1 McGillian going'), findsOneWidget);
+      expect(find.text('Maya Tremblay'), findsWidgets);
       expect(pill('Photo Walk'), findsNothing);
     });
   });
@@ -319,9 +391,8 @@ void main() {
       expect(y('New'), lessThan(y('Title a')));
       expect(y('Title b'), lessThan(y('Earlier')));
       expect(y('Earlier'), lessThan(y('Title c')));
-      // The pill agrees with the message: one, though four are going by now.
-      expect(_inDrawer(find.byType(FriendRsvpPill)), findsOneWidget);
-      expect(_inDrawer(find.text('1 McGillian going')), findsOneWidget);
+      // The drawer uses the inbox message, free of stale avatar identities.
+      expect(_inDrawer(find.byType(FriendRsvpPill)), findsNothing);
       expect(_inDrawer(find.text('2 d ago')), findsOneWidget);
     });
 
@@ -540,6 +611,35 @@ void main() {
       return (SupabaseBackend(client), requests);
     }
 
+    test('sets account privacy without a client-supplied user ID', () async {
+      final (backend, requests) = await connect((_) => ('friends', 200));
+      expect(
+        await backend.setRsvpVisibility(StudentVisibility.friends),
+        StudentVisibility.friends,
+      );
+      expect(requests.single.url.path, '/rest/v1/rpc/set_my_rsvp_visibility');
+      expect(jsonDecode(requests.single.body), {'preference': 'friends'});
+    });
+
+    test('creates an RSVP without supplying visibility', () async {
+      final (backend, requests) = await connect(
+        (_) => ({'visibility': 'public'}, 200),
+      );
+      expect(
+        await backend.setRsvp('e1', going: true),
+        StudentVisibility.public,
+      );
+      expect(requests.single.url.path, '/rest/v1/event_rsvps');
+      expect(jsonDecode(requests.single.body), {
+        'event_id': 'e1',
+        'profile_id': me,
+      });
+      expect(
+        requests.single.headers['prefer'],
+        contains('resolution=ignore-duplicates'),
+      );
+    });
+
     test('reads friend RSVPs', () async {
       final (backend, requests) = await connect(
         (_) => (
@@ -548,7 +648,11 @@ void main() {
               'event_id': 'e1',
               'friend_rsvp_count': 4,
               'friend_rsvps': [
-                {'full_name': 'Dee', 'avatar_url': 'https://x/d.png'},
+                {
+                  'profile_id': 'dee-id',
+                  'full_name': 'Dee',
+                  'avatar_url': 'https://x/d.png',
+                },
                 {'full_name': ' ', 'avatar_url': null},
               ],
             },
@@ -560,8 +664,11 @@ void main() {
       expect(requests.single.url.path, '/rest/v1/rpc/friend_rsvps');
       expect(rsvps['e1']!.count, 4);
       expect(
-        [for (final f in rsvps['e1']!.friends) (f.name, f.avatarUrl)],
-        [('Dee', 'https://x/d.png'), ('McMap Student', null)],
+        [
+          for (final f in rsvps['e1']!.friends)
+            (f.profileId, f.name, f.avatarUrl),
+        ],
+        [('dee-id', 'Dee', 'https://x/d.png'), (null, '', null)],
       );
     });
 
@@ -577,7 +684,8 @@ void main() {
         'friend_rsvp_count': 2,
         'is_read': false,
         'created_at': '2026-11-22T10:00:00+00:00',
-        'groups': {'name': 'EUS', 'avatar_url': 'https://x/eus.png'},
+        'group_name': 'EUS',
+        'group_avatar_url': 'https://x/eus.png',
       };
       final (backend, requests) = await connect(
         (_) => ([row('event_deadline_soon'), row('something_new')], 200),
@@ -588,6 +696,7 @@ void main() {
       expect(item.groupAvatarUrl, 'https://x/eus.png');
       expect(item.friendRsvpCount, 2);
       expect(item.createdAt, DateTime.utc(2026, 11, 22, 10));
+      expect(requests.single.url.path, '/rest/v1/notification_inbox');
       expect(requests.single.url.queryParameters['user_id'], 'eq.$me');
     });
 

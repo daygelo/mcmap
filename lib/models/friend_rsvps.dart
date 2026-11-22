@@ -1,8 +1,9 @@
 /// One of your McGillians going to an event.
 class RsvpFriend {
-  const RsvpFriend({required this.name, this.avatarUrl});
+  const RsvpFriend({required this.name, this.avatarUrl, this.profileId});
 
   final String name;
+  final String? profileId;
   final String? avatarUrl;
 }
 

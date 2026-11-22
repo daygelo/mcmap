@@ -22,6 +22,8 @@ class OrganizationPage extends StatelessWidget {
     this.group,
     this.following = false,
     this.autoRsvp = false,
+    this.notifications = false,
+    this.onNotifications,
     this.onFollow,
     this.onAutoRsvp,
   });
@@ -34,6 +36,8 @@ class OrganizationPage extends StatelessWidget {
   final CampusGroup? group;
   final bool following;
   final bool autoRsvp;
+  final bool notifications;
+  final ValueChanged<bool>? onNotifications;
   final VoidCallback? onFollow;
   final ValueChanged<bool>? onAutoRsvp;
 
@@ -108,8 +112,16 @@ class OrganizationPage extends StatelessWidget {
                       onPressed: onFollow,
                     ),
                   ),
-                  if (following)
+                  if (following) ...[
+                    if (onNotifications != null)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Event notifications'),
+                        value: notifications,
+                        onChanged: onNotifications,
+                      ),
                     AutoRsvpSwitch(value: autoRsvp, onChanged: onAutoRsvp),
+                  ],
                 ],
                 const SizedBox(height: 24),
                 Container(

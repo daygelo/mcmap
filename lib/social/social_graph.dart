@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../backend/mcmap_backend.dart';
 import '../data/academics.dart';
+import '../models/club_event.dart';
 
 /// Your relationship to another student.
 enum FriendStatus {
@@ -109,6 +110,19 @@ class SocialGraph extends ChangeNotifier {
 
   /// Called when the server has saved a change to your connections.
   VoidCallback? onConnectionsSaved;
+  ValueChanged<ClubEvent>? onOpenEvent;
+
+  final attendanceRevision = ValueNotifier(0);
+
+  void refreshAttendance() => attendanceRevision.value++;
+
+  Future<McGillian?> findProfile(String id) async {
+    final backend = this.backend;
+    if (backend == null) {
+      return _directory.where((student) => student.handle == id).firstOrNull;
+    }
+    return backend.fetchMcGillian(id);
+  }
 
   String? _lastRemoteQuery;
   Timer? _searchDebounce;
@@ -244,6 +258,7 @@ class SocialGraph extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _searchDebounce?.cancel();
+    attendanceRevision.dispose();
     super.dispose();
   }
 }

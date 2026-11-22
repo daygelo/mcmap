@@ -18,7 +18,15 @@ update public.profiles set is_private = true
 update public.profiles set avatar_url = 'https://example.test/dee.png'
   where id = 'a1000000-0000-4000-8000-000000000005';
 
--- "Me" follows everyone but Sam; Ray's request is still pending.
+update public.profiles
+set onboarding_completed = true, account_purpose = 'organizer',
+  rsvp_visibility = case right(id::text, 1)
+    when '2' then 'friends' when '4' then 'friends' when '5' then 'friends'
+    when '3' then 'public' when '7' then 'public' when '8' then 'public'
+    else 'private' end::public.rsvp_visibility
+where id::text like 'a1000000-%';
+
+-- "Me" and the first five students follow each other. Ray's request is pending.
 insert into public.mcgillians (follower_id, following_id)
 select 'a1000000-0000-4000-8000-000000000001', id from public.profiles
 where id in (
@@ -27,15 +35,19 @@ where id in (
   'a1000000-0000-4000-8000-000000000006', 'a1000000-0000-4000-8000-000000000008'
 );
 
+insert into public.mcgillians (follower_id, following_id)
+select following_id, follower_id from public.mcgillians
+where follower_id = 'a1000000-0000-4000-8000-000000000001';
+
 insert into public.groups (id, slug, name, short_name) values
   ('b1000000-0000-4000-8000-000000000001', 'notify-eus', 'Engineering Undergraduate Society', 'EUS'),
   ('b1000000-0000-4000-8000-000000000002', 'notify-chess', 'Chess Club', null),
   ('b1000000-0000-4000-8000-000000000003', 'notify-other', 'Unfollowed Club', null);
 
 insert into public.profile_organization_follows (profile_id, follows) values
-  ('a1000000-0000-4000-8000-000000000001', '{"notify-eus": {}, "notify-chess": {}}'),
-  ('a1000000-0000-4000-8000-000000000007', '{"notify-eus": {}}'),
-  ('a1000000-0000-4000-8000-000000000009', '{"notify-eus": {}}');
+  ('a1000000-0000-4000-8000-000000000001', '{"notify-eus": {"event_notifications_enabled_at": "2000-01-01T00:00:00Z"}, "notify-chess": {"event_notifications_enabled_at": "2000-01-01T00:00:00Z"}}'),
+  ('a1000000-0000-4000-8000-000000000007', '{"notify-eus": {"event_notifications_enabled_at": "2000-01-01T00:00:00Z"}}'),
+  ('a1000000-0000-4000-8000-000000000009', '{"notify-eus": {"event_notifications_enabled_at": "2000-01-01T00:00:00Z"}}');
 insert into public.group_publishers (profile_id, group_id, role) values
   ('a1000000-0000-4000-8000-000000000009', 'b1000000-0000-4000-8000-000000000001', 'president');
 
@@ -55,6 +67,7 @@ select public.publish_event(
   'Blues Pub', 'Weekly pub.', now() + interval '5 days', null, 'FDA'
 );
 reset role;
+set local request.jwt.claim.sub = '';
 
 insert into public.events (id, group_id, title, starts_at, rsvp_deadline, published_at, created_at, cancelled) values
   -- no short name; closes tomorrow; nobody going
@@ -149,8 +162,8 @@ begin
     or formal.friend_rsvps->0->>'avatar_url' <> 'https://example.test/dee.png' then
     raise exception 'Wrong friends: %', formal.friend_rsvps;
   end if;
-  if (select (formal.friend_rsvps->0) - 'full_name' - 'avatar_url') <> '{}'::jsonb then
-    raise exception 'Friends should only carry a name and a picture';
+  if (select (formal.friend_rsvps->0) - 'full_name' - 'avatar_url' - 'profile_id') <> '{}'::jsonb then
+    raise exception 'Friends should only carry a profile ID, name and picture';
   end if;
 
   begin
@@ -200,14 +213,20 @@ select public.refresh_my_notifications();
 reset role;
 
 do $$
-declare
-  mine text[];
 begin
   if exists (select 1 from public.notifications
     where type = 'event_deadline_soon' and user_id <> 'a1000000-0000-4000-8000-000000000001') then
     raise exception 'Refreshing wrote notifications for other students';
   end if;
-  select array_agg(body order by body) into mine from public.notifications
+end;
+$$;
+
+set local role authenticated;
+do $$
+declare
+  mine text[];
+begin
+  select array_agg(body order by body) into mine from public.notification_inbox
   where user_id = 'a1000000-0000-4000-8000-000000000001' and type = 'event_deadline_soon';
   if mine is distinct from array[
     'RSVP deadline for Blitz Night hosted by Chess Club ends soon.',
@@ -216,12 +235,34 @@ begin
   ] then
     raise exception 'Wrong deadline notifications: %', mine;
   end if;
-  if (select friend_rsvp_count from public.notifications
-      where event_id = 'c1000000-0000-4000-8000-000000000003' and type = 'event_deadline_soon') <> 4 then
-    raise exception 'Wrong stored count';
+  if (select friend_rsvp_count from public.notification_inbox
+      where event_id = 'c1000000-0000-4000-8000-000000000003' and type = 'event_deadline_soon') is distinct from 4 then
+    raise exception 'Wrong inbox count';
+  end if;
+  if exists (select 1 from public.notifications
+      where friend_rsvp_count <> 0 or body like '%McGillians RSVPed!') then
+    raise exception 'Raw notifications store attendance';
   end if;
 end;
 $$;
+
+set local request.jwt.claim.sub = 'a1000000-0000-4000-8000-000000000002';
+select public.set_my_rsvp_visibility('private');
+
+set local request.jwt.claim.sub = 'a1000000-0000-4000-8000-000000000001';
+do $$
+begin
+  if not exists (select 1 from public.notification_inbox
+      where event_id = 'c1000000-0000-4000-8000-000000000003'
+        and type = 'event_deadline_soon'
+        and friend_rsvp_count = 3
+        and body like '%3 of your McGillians RSVPed!') then
+    raise exception 'Inbox still counts the RSVP after it became private';
+  end if;
+end;
+$$;
+
+reset role;
 
 -- The scheduled run covers everyone else and repeats nothing. EUS is followed
 -- by Sam (going to Formal already) and by Hana.
@@ -276,6 +317,10 @@ begin
     where user_id <> 'a1000000-0000-4000-8000-000000000007') then
     raise exception 'Another student''s notifications are readable';
   end if;
+  if exists (select 1 from public.notification_inbox
+    where user_id <> 'a1000000-0000-4000-8000-000000000007') then
+    raise exception 'Another student''s inbox is readable';
+  end if;
   update public.notifications set is_read = true
     where user_id = 'a1000000-0000-4000-8000-000000000001';
   if found then raise exception 'Another student''s notifications can be changed'; end if;
@@ -314,6 +359,11 @@ begin
   begin
     perform 1 from public.notifications;
     raise exception 'Signed-out visitors can read notifications';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.notification_inbox;
+    raise exception 'Signed-out visitors can read the inbox';
   exception when insufficient_privilege then null;
   end;
   begin

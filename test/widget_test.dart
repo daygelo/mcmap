@@ -356,7 +356,7 @@ void main() {
   });
 
   testWidgets(
-    'offers only RSVP privacy and preserves existing RSVP visibility',
+    'offers account-wide RSVP privacy and updates existing demo RSVPs',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 1150));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -384,6 +384,9 @@ void main() {
       expect(selected(), StudentVisibility.friends);
       await tester.tap(find.text('Public'));
       await tester.pumpAndSettle();
+      expect(selected(), StudentVisibility.friends);
+      await tester.tap(find.text('Make public'));
+      await tester.pumpAndSettle();
       expect(selected(), StudentVisibility.public);
       await tester.pageBack();
       await tester.pumpAndSettle();
@@ -395,15 +398,14 @@ void main() {
       expect(find.byType(McGillMapPage).hitTestable(), findsOneWidget);
       await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
-      expect(
-        find.text('Going · Demo visibility: Private').hitTestable(),
-        findsOneWidget,
+      expect(find.text('Going · Demo visibility: Private'), findsNothing);
+      await tester.ensureVisible(
+        find.text('Going · Demo visibility: Public').last,
       );
-      await tester.ensureVisible(find.text('Going · Demo visibility: Public'));
       await tester.pumpAndSettle();
       expect(
         find.text('Going · Demo visibility: Public').hitTestable(),
-        findsOneWidget,
+        findsNWidgets(2),
       );
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
@@ -415,7 +417,7 @@ void main() {
         -300,
         scrollable: find
             .ancestor(
-              of: find.text('Going · Demo visibility: Public'),
+              of: find.text('Going · Demo visibility: Public').first,
               matching: find.byType(Scrollable),
             )
             .first,

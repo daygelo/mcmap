@@ -19,6 +19,7 @@ class AccountProfile {
     required this.fullName,
     this.avatarUrl,
     this.bio = '',
+    this.rsvpVisibility = StudentVisibility.private,
     this.academics,
     bool? onboardingCompleted,
   }) : onboardingCompleted = onboardingCompleted ?? academics != null;
@@ -28,6 +29,7 @@ class AccountProfile {
   final String fullName;
   final String? avatarUrl;
   final String bio;
+  final StudentVisibility rsvpVisibility;
 
   /// Academic details when the account has a student profile.
   final UserProfile? academics;
@@ -66,6 +68,8 @@ abstract interface class McMapBackend {
 
   Future<void> setOrganizationFollow(String id, bool following);
   Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled);
+  Future<Map<String, DateTime>> fetchOrganizationNotificationOptIns();
+  Future<DateTime?> setOrganizationNotifications(String id, bool enabled);
 
   /// Public organizations keyed by the same stable slugs as events.
   Future<Map<String, CampusGroup>> fetchOrganizations();
@@ -94,8 +98,14 @@ abstract interface class McMapBackend {
 
   Future<Map<String, StudentVisibility>> fetchMyRsvps();
 
-  /// Null cancels the RSVP.
-  Future<void> setRsvp(String eventId, StudentVisibility? visibility);
+  Future<StudentVisibility> setRsvpVisibility(StudentVisibility visibility);
+
+  /// Returns the visibility that the server assigned, or null on cancellation.
+  Future<StudentVisibility?> setRsvp(String eventId, {required bool going});
+
+  Future<McGillian?> fetchMcGillian(String profileId);
+  Future<List<ClubEvent>> fetchProfileRsvps(String profileId);
+  Future<List<RsvpFriend>> fetchEventAttendees(String eventId);
 
   /// Your McGillians going to upcoming events, by event id. Events with none
   /// are left out, as are RSVPs their owner keeps private.

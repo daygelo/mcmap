@@ -20,6 +20,8 @@ class EventDetailsPage extends StatelessWidget {
     this.onOpenClub,
     this.recommended = false,
     this.friendRsvps = FriendRsvps.none,
+    this.onFriendTap,
+    this.attendees,
   });
 
   final ClubEvent event;
@@ -33,6 +35,8 @@ class EventDetailsPage extends StatelessWidget {
 
   /// Your McGillians going.
   final FriendRsvps friendRsvps;
+  final ValueChanged<String>? onFriendTap;
+  final Future<List<RsvpFriend>>? attendees;
 
   static String routeFor(String id) => '/events/$id';
 
@@ -108,7 +112,10 @@ class EventDetailsPage extends StatelessWidget {
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: FriendRsvpPill(friendRsvps),
+                    child: FriendRsvpPill(
+                      friendRsvps,
+                      onFriendTap: onFriendTap,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -127,6 +134,47 @@ class EventDetailsPage extends StatelessWidget {
                       minimumSize: const Size.fromHeight(48),
                     ),
                     child: const Text('RSVP'),
+                  ),
+                if (attendees case final attendance?)
+                  FutureBuilder<List<RsvpFriend>>(
+                    future: attendance,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const SizedBox.shrink();
+                      }
+                      final people = snapshot.data
+                          ?.where((person) => person.name.isNotEmpty)
+                          .toList();
+                      if (people == null || people.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Visible attendees', style: text.titleLarge),
+                            for (final person in people)
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: InitialsAvatar(
+                                  name: person.name,
+                                  image: switch (person.avatarUrl) {
+                                    final url? => NetworkImage(url),
+                                    null => null,
+                                  },
+                                ),
+                                title: Text(person.name),
+                                onTap:
+                                    person.profileId == null ||
+                                        onFriendTap == null
+                                    ? null
+                                    : () => onFriendTap!(person.profileId!),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 const SizedBox(height: 28),
                 Text('About this event', style: text.titleLarge),

@@ -74,6 +74,23 @@ flutter run -d chrome \
 
 Never use or commit a Supabase service-role key. The publishable/anon key is intended for client applications.
 
+## Campus map
+
+The Map tab needs `MAPBOX_TOKEN` (`flutter run --dart-define-from-file=.env`).
+Camera limits are in `lib/data/campus_map.dart`.
+
+Highlighted buildings and the offices and lounges inside them are in
+`lib/data/campus_buildings.dart`. Every space records the page its details
+came from; leave a room out rather than guess. To add a building, add it there
+and to `WAYS` in `tool/build_campus_shapes.py` (its OpenStreetMap way id), then
+run that script to regenerate `lib/data/campus_building_shapes.dart`. Shapes
+are the surveyed roofs in Montréal's 3D building model (CC BY 4.0), divided
+along © OpenStreetMap outlines (ODbL), with ground level from Natural Resources
+Canada's HRDEM (Open Government Licence - Canada). The map key credits them.
+
+Mapbox reports every building along the line of sight, so `SightLine` works out
+whether a tapped building is hidden behind another one.
+
 ## Development
 
 ```bash

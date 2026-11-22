@@ -934,7 +934,13 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             if (_hasOpenedMap)
-              const McGillMapPage()
+              McGillMapPage(
+                events: [for (final (event, _) in going) event],
+                onOpenEvent: _openEvent,
+                onOpenOrganization: (id) {
+                  if (clubsById[id] case final club?) _openClub(club);
+                },
+              )
             else
               const SizedBox.shrink(),
             if (_publishingGroups.isNotEmpty)

@@ -27,6 +27,7 @@ import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/social/social_graph.dart';
 import 'package:mcmap/theme/app_theme.dart';
+import 'package:mcmap/widgets/map_compass.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// In-memory stand-in for Supabase that records what the app saved.
@@ -510,7 +511,10 @@ void main() {
     expect(
       tester
           .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.my_location_rounded),
+            find.descendant(
+              of: find.byType(MapCompass),
+              matching: find.byType(IconButton),
+            ),
           )
           .onPressed,
       isNull,

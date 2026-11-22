@@ -2,17 +2,10 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../models/student_visibility.dart';
 
-export '../../models/student_visibility.dart';
-
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({
-    super.key,
-    required this.rsvpVisibility,
-    required this.profileVisibility,
-  });
+  const SettingsPage({super.key, required this.rsvpVisibility});
 
   final ValueNotifier<StudentVisibility> rsvpVisibility;
-  final ValueNotifier<StudentVisibility> profileVisibility;
 
   @override
   Widget build(BuildContext context) {
@@ -30,32 +23,11 @@ class SettingsPage extends StatelessWidget {
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Demo only. Choices reset when the app restarts. '
-                  'Backend privacy enforcement is pending.',
-                ),
+                const Text('Your default resets when the app restarts.'),
                 const SizedBox(height: 20),
-                _VisibilitySection(
-                  title: 'Who can see my RSVPs?',
-                  value: rsvpVisibility,
-                  descriptions: const [
-                    'Only me.',
-                    'Only my accepted friends.',
-                    'Other McMap students may see my attendance.',
-                  ],
-                ),
+                _RsvpVisibilitySection(value: rsvpVisibility),
                 const SizedBox(height: 8),
                 const Text('This default applies only to new RSVPs.'),
-                const SizedBox(height: 20),
-                _VisibilitySection(
-                  title: 'Who can view my profile?',
-                  value: profileVisibility,
-                  descriptions: const [
-                    'Only me.',
-                    'Only my accepted friends can view my profile.',
-                    'Other McMap students can view my profile.',
-                  ],
-                ),
               ],
             ),
           ),
@@ -65,16 +37,16 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class _VisibilitySection extends StatelessWidget {
-  const _VisibilitySection({
-    required this.title,
-    required this.value,
-    required this.descriptions,
-  });
+class _RsvpVisibilitySection extends StatelessWidget {
+  const _RsvpVisibilitySection({required this.value});
 
-  final String title;
   final ValueNotifier<StudentVisibility> value;
-  final List<String> descriptions;
+
+  static const _descriptions = {
+    StudentVisibility.private: 'Only me.',
+    StudentVisibility.friends: 'Only my accepted friends.',
+    StudentVisibility.public: 'Other McMap students may see my attendance.',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +57,10 @@ class _VisibilitySection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Who can see my RSVPs?',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             ValueListenableBuilder(
               valueListenable: value,
               builder: (context, selected, child) {
@@ -100,7 +75,7 @@ class _VisibilitySection extends StatelessWidget {
                         RadioListTile<StudentVisibility>(
                           value: option,
                           title: Text(option.label),
-                          subtitle: Text(descriptions[option.index]),
+                          subtitle: Text(_descriptions[option]!),
                         ),
                     ],
                   ),

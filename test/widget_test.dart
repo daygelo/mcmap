@@ -4,7 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/main.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/theme/app_theme.dart';
-import 'package:mcmap/pages/student/settings_page.dart';
+import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/widgets/profile_stats.dart';
@@ -81,7 +81,14 @@ void main() {
     );
 
     expect(find.text('McMap'), findsOneWidget);
-    expect(find.text('Find club events'), findsOneWidget);
+    expect(find.text('Find club events'), findsNothing);
+    final search = find.byType(SearchBar);
+    expect(search.hitTestable(), findsOneWidget);
+    expect(
+      tester.getTopLeft(search).dy -
+          tester.getBottomLeft(find.byType(AppBar)).dy,
+      inInclusiveRange(0, 20),
+    );
     final header = tester.element(find.text('McMap'));
     final appBar = tester.widget<AppBar>(find.byType(AppBar));
     final titleStyle = DefaultTextStyle.of(header).style;
@@ -317,7 +324,7 @@ void main() {
   });
 
   testWidgets(
-    'keeps privacy choices independent and preserves RSVP visibility',
+    'offers only RSVP privacy and preserves existing RSVP visibility',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 1150));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -330,23 +337,22 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsNothing);
-      List<RadioGroup<StudentVisibility>> groups() => tester
-          .widgetList<RadioGroup<StudentVisibility>>(
-            find.byType(RadioGroup<StudentVisibility>),
-          )
-          .toList();
-      expect(groups().map((group) => group.groupValue?.name), [
-        'private',
-        'private',
-      ]);
-      await tester.tap(find.text('Public').first);
+      final radioGroup = find.byType(RadioGroup<StudentVisibility>);
+      StudentVisibility? selected() =>
+          tester.widget<RadioGroup<StudentVisibility>>(radioGroup).groupValue;
+      expect(radioGroup, findsOneWidget);
+      expect(find.text('Who can see my RSVPs?'), findsOneWidget);
+      expect(find.text('Who can view my profile?'), findsNothing);
+      for (final option in StudentVisibility.values) {
+        expect(find.text(option.label), findsOneWidget);
+      }
+      expect(selected(), StudentVisibility.private);
+      await tester.tap(find.text('Friends'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Friends').last);
+      expect(selected(), StudentVisibility.friends);
+      await tester.tap(find.text('Public'));
       await tester.pumpAndSettle();
-      expect(groups().map((group) => group.groupValue?.name), [
-        'public',
-        'friends',
-      ]);
+      expect(selected(), StudentVisibility.public);
       await tester.pageBack();
       await tester.pumpAndSettle();
 
@@ -372,10 +378,7 @@ void main() {
       );
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(groups().map((group) => group.groupValue?.name), [
-        'public',
-        'friends',
-      ]);
+      expect(selected(), StudentVisibility.public);
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -429,7 +432,7 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Coding').hitTestable(), findsOneWidget);
-    await tester.tap(find.text('2 Club Memberships'));
+    await tester.tap(find.text('2 Following'));
     await tester.pumpAndSettle();
     expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
     expect(find.text('Mcgill Board Game Students’ Society'), findsOneWidget);
@@ -464,17 +467,13 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Software Engineering · U2'), findsOneWidget);
-    await tester.tap(find.text('0 Club Memberships'));
+    expect(find.text('0 Following'), findsOneWidget);
+    expect(find.text('Your Club Memberships'), findsNothing);
+    expect(find.text('Add Clubs'), findsNothing);
+    await tester.tap(find.text('0 Following'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add Clubs'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(SearchBar), 'MESA');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('McGill Esports Student’s Association'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save Clubs'));
-    await tester.pumpAndSettle();
-    expect(find.text('McGill Esports Student’s Association'), findsOneWidget);
+    expect(find.text("You're not following any clubs yet."), findsOneWidget);
+    expect(find.text('Browse Clubs'), findsOneWidget);
   });
 
   testWidgets('U-year only appears for undergraduates', (tester) async {

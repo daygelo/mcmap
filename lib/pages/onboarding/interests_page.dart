@@ -32,12 +32,13 @@ class _InterestsPageState extends State<InterestsPage> {
 
   Future<void> _continueToClubs() async {
     final ids = await Navigator.of(context).push<Set<String>>(
-      MaterialPageRoute(builder: (_) => const ClubPickerPage(onboarding: true)),
+      MaterialPageRoute(builder: (_) => const ClubPickerPage()),
     );
     if (!mounted || ids == null) return;
-    final profile = widget.profile
-        .copyWith(interests: _selected)
-        .withClubIds(ids);
+    final profile = widget.profile.copyWith(
+      interests: _selected,
+      followedClubIds: {...widget.profile.followedClubIds, ...ids},
+    );
 
     // Signed in: save to Supabase, then return to AuthGate, which reloads
     // the profile and opens the app.

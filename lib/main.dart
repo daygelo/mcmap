@@ -140,7 +140,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
         final account = snapshot.data;
-        if (account == null) {
+        if (account == null || account.id != _user?.id) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );

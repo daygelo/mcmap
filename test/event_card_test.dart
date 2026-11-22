@@ -26,7 +26,9 @@ void main() {
     expect(initialsFor('chess'), 'C');
   });
 
-  testWidgets('cards show the club avatar and an AI summary', (tester) async {
+  testWidgets('cards show the club avatar and summary without a label', (
+    tester,
+  ) async {
     await _pumpHome(tester);
     final card = _card('Photo Walk');
     expect(
@@ -35,7 +37,14 @@ void main() {
     );
     expect(
       find.descendant(of: card, matching: find.text('AI SUMMARY')),
-      findsOneWidget,
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.byIcon(Icons.auto_awesome_rounded),
+      ),
+      findsNothing,
     );
     expect(
       find.descendant(of: card, matching: find.textContaining('golden-hour')),

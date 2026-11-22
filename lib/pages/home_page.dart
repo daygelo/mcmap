@@ -9,15 +9,14 @@ import '../data/academics.dart';
 import '../data/club_event_feed.dart';
 import '../data/clubs.dart';
 import '../models/club_event.dart';
+import '../models/student_visibility.dart';
 import '../services/local_rsvps.dart';
-import 'club_picker_page.dart';
+import 'create_event_page.dart';
 import 'event_details_page.dart';
 import 'organization_page.dart';
 import 'student/club_discovery.dart';
-import 'student/club_profile.dart';
 import 'student/edit_profile_page.dart';
 import 'student/suggested_clubs.dart';
-import 'student/your_clubs.dart';
 import '../models/user_profile.dart';
 import '../theme/app_theme.dart';
 import 'student/settings_page.dart';
@@ -48,6 +47,8 @@ enum _EventDiscovery {
 
   final String label;
 }
+
+enum _Destination { home, map, create, profile }
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -80,6 +81,19 @@ class _HomePageState extends State<HomePage> {
       for (final event in _sampleEvents) event.id: event,
   };
   bool _loadingEvents = false;
+  Future<bool>? _organizationFollowsLoad;
+  bool _usingLocalOrganizationFollows = false;
+  final _pendingOrganizationChanges = <String>{};
+  Map<String, String> _organizationNames = const {};
+
+  Map<String, String> get _otherOrganizations => {
+    for (final event in _events.values)
+      if (event.clubId case final id?
+          when !clubsById.containsKey(id) && event.club.isNotEmpty)
+        id: event.club,
+    for (final entry in _organizationNames.entries)
+      if (!clubsById.containsKey(entry.key)) entry.key: entry.value,
+  };
   final _rsvps = LocalRsvps();
   final _clubUpdates = <String, ClubEvent>{};
   final _clubRevision = ValueNotifier(0);
@@ -96,7 +110,6 @@ class _HomePageState extends State<HomePage> {
         year: 'U0',
       );
   final _rsvpVisibility = ValueNotifier(StudentVisibility.private);
-  final _profileVisibility = ValueNotifier(StudentVisibility.private);
   late StudentProfile _profile = switch (widget.profile) {
     final profile? => StudentProfile(
       name: switch (widget.account?.fullName.trim()) {
@@ -124,7 +137,16 @@ class _HomePageState extends State<HomePage> {
   String _query = '';
   _EventDiscovery _discovery = _EventDiscovery.all;
   _SearchScope _scope = _SearchScope.all;
-  int _selectedIndex = 0;
+  _Destination _destination = _Destination.home;
+  List<PublishingGroup> _publishingGroups = const [];
+  final _publishedDuringLoad = <String, ClubEvent>{};
+
+  List<_Destination> get _destinations => [
+    _Destination.home,
+    _Destination.map,
+    if (_publishingGroups.isNotEmpty) _Destination.create,
+    _Destination.profile,
+  ];
 
   /// Filter pills only show while you're searching, so the default home
   /// screen stays a clean event feed.
@@ -167,60 +189,139 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  Future<void> _editClubs() async {
-    final ids = await Navigator.of(context).push<Set<String>>(
-      MaterialPageRoute(
-        builder: (_) => ClubPickerPage(
-          initialSelection: _clubProfile.memberships.keys.toSet(),
-        ),
-      ),
-    );
-    if (mounted && ids != null) {
-      _changeClubState(() => _clubProfile = _clubProfile.withClubIds(ids));
+  Future<bool> _loadOrganizationFollows(McMapBackend backend) async {
+    try {
+      final follows = await backend.fetchOrganizationFollows();
+      if (!mounted) return false;
+      _changeClubState(() {
+        _clubProfile = _clubProfile.copyWith(
+          followedClubIds: follows.keys.toSet(),
+          clubAutoRsvpOptIns: {
+            for (final entry in follows.entries) entry.key: ?entry.value,
+          },
+        );
+      });
+      return true;
+    } on OrganizationFollowsUnavailable {
+      if (!mounted) return false;
+      _changeClubState(() => _usingLocalOrganizationFollows = true);
+      return true;
+    } catch (_) {
+      _organizationFollowsLoad = null;
+      if (mounted) {
+        _showError(
+          "Couldn't load followed organizations. Try following a group to retry.",
+        );
+      }
+      return false;
     }
   }
 
-  void _removeClub(String id) {
-    _changeClubState(
-      () => _clubProfile = _clubProfile.withClubIds(
-        _clubProfile.memberships.keys.toSet()..remove(id),
-      ),
-    );
+  Future<void> _toggleFollow(String id) async {
+    final backend = widget.backend;
+    final following = !_clubProfile.followedClubIds.contains(id);
+    if (backend == null || _usingLocalOrganizationFollows) {
+      _changeOrganizationFollow(id, following);
+      return;
+    }
+    if (!_pendingOrganizationChanges.add(id)) return;
+    try {
+      final loaded = await (_organizationFollowsLoad ??=
+          _loadOrganizationFollows(backend));
+      if (!mounted || !loaded) return;
+      if (_clubProfile.followedClubIds.contains(id) == following) return;
+      final notificationOptIn = _clubProfile.clubNotificationOptIns[id];
+      final autoRsvpOptIn = _clubProfile.clubAutoRsvpOptIns[id];
+      _changeOrganizationFollow(id, following);
+      if (_usingLocalOrganizationFollows) return;
+      try {
+        await backend.setOrganizationFollow(id, following);
+      } catch (_) {
+        if (!mounted) return;
+        _changeOrganizationFollow(
+          id,
+          !following,
+          notificationOptIn: notificationOptIn,
+          autoRsvpOptIn: autoRsvpOptIn,
+        );
+        _showError("Couldn't update Following. Try again.");
+      }
+    } finally {
+      _pendingOrganizationChanges.remove(id);
+      if (mounted) _clubRevision.value++;
+    }
   }
 
-  void _updateClub(String id, {bool? showOnProfile, bool? autoRsvp}) {
-    final membership = _clubProfile.memberships[id];
-    if (membership == null) return;
-    _changeClubState(
-      () => _clubProfile = _clubProfile.copyWith(
-        memberships: {
-          ..._clubProfile.memberships,
-          id: membership.copyWith(
-            showOnProfile: showOnProfile,
-            autoRsvpEnabledAt: autoRsvp == true
-                ? membership.autoRsvpEnabledAt ?? DateTime.now()
-                : null,
-            clearAutoRsvp: autoRsvp == false,
-          ),
-        },
-      ),
-    );
-  }
-
-  void _toggleFollow(String id) {
+  void _changeOrganizationFollow(
+    String id,
+    bool following, {
+    DateTime? notificationOptIn,
+    DateTime? autoRsvpOptIn,
+  }) {
     final followed = {..._clubProfile.followedClubIds};
     final optIns = {..._clubProfile.clubNotificationOptIns};
-    if (followed.remove(id)) {
-      optIns.remove(id);
-    } else {
+    final autoRsvps = {..._clubProfile.clubAutoRsvpOptIns};
+    if (following) {
       followed.add(id);
+      if (notificationOptIn != null) optIns[id] = notificationOptIn;
+      if (autoRsvpOptIn != null) autoRsvps[id] = autoRsvpOptIn;
+    } else {
+      followed.remove(id);
+      optIns.remove(id);
+      autoRsvps.remove(id);
     }
     _changeClubState(
       () => _clubProfile = _clubProfile.copyWith(
         followedClubIds: followed,
         clubNotificationOptIns: optIns,
+        clubAutoRsvpOptIns: autoRsvps,
       ),
     );
+  }
+
+  ValueChanged<bool>? _autoRsvpAction(String id) =>
+      _pendingOrganizationChanges.contains(id)
+      ? null
+      : (enabled) => _setAutoRsvp(id, enabled);
+
+  Future<void> _setAutoRsvp(String id, bool enabled) async {
+    if (!_clubProfile.followedClubIds.contains(id) ||
+        !_pendingOrganizationChanges.add(id)) {
+      return;
+    }
+    _clubRevision.value++;
+    try {
+      final backend = widget.backend;
+      final timestamp = backend == null || _usingLocalOrganizationFollows
+          ? (enabled ? DateTime.now() : null)
+          : await backend.setOrganizationAutoRsvp(id, enabled);
+      if (!mounted) return;
+      final optIns = {..._clubProfile.clubAutoRsvpOptIns};
+      if (timestamp == null) {
+        optIns.remove(id);
+      } else {
+        optIns[id] = timestamp;
+      }
+      _changeClubState(
+        () => _clubProfile = _clubProfile.copyWith(clubAutoRsvpOptIns: optIns),
+      );
+    } catch (_) {
+      if (mounted) {
+        _showError("Couldn't save your auto-RSVP preference. Try again.");
+      }
+    } finally {
+      _pendingOrganizationChanges.remove(id);
+      if (mounted) _clubRevision.value++;
+    }
+  }
+
+  Future<void> _loadOrganizationNames(McMapBackend backend) async {
+    try {
+      final names = await backend.fetchOrganizationNames();
+      if (mounted) _changeClubState(() => _organizationNames = names);
+    } catch (_) {
+      // Event organizers and the bundled club directory remain available.
+    }
   }
 
   void _setNotifications(String id, bool enabled) {
@@ -246,7 +347,33 @@ class _HomePageState extends State<HomePage> {
     };
     _social.addListener(_onSocialChanged);
     _listenForPublications();
-    if (widget.backend != null) unawaited(_loadFromServer());
+    if (widget.backend case final backend?) {
+      unawaited(_loadFromServer());
+      _organizationFollowsLoad = _loadOrganizationFollows(backend);
+      unawaited(_loadOrganizationNames(backend));
+    }
+    if (widget.account != null && widget.backend != null) {
+      unawaited(_loadPublishingGroups(widget.backend!));
+    }
+  }
+
+  Future<void> _loadPublishingGroups(McMapBackend backend) async {
+    try {
+      final groups = await backend.fetchPublishingGroups();
+      if (mounted) setState(() => _publishingGroups = groups);
+    } catch (_) {
+      // Discovery remains available if publisher verification fails.
+    }
+  }
+
+  void _onEventPublished(ClubEvent event) {
+    _changeClubState(() {
+      if (_loadingEvents) _publishedDuringLoad[event.id] = event;
+      _events[event.id] = event;
+      _destination = _Destination.home;
+    });
+    _openEvent(event);
+    _showError('Event published.');
   }
 
   /// Search results for McGillians arrive asynchronously.
@@ -267,13 +394,18 @@ class _HomePageState extends State<HomePage> {
       _changeClubState(() {
         _events
           ..clear()
-          ..addEntries(events.map((e) => MapEntry(e.id, e)));
+          ..addEntries(events.map((e) => MapEntry(e.id, e)))
+          ..addAll(_publishedDuringLoad);
+        _publishedDuringLoad.clear();
         _rsvps.restore(rsvps);
         _loadingEvents = false;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _loadingEvents = false);
+      setState(() {
+        _loadingEvents = false;
+        _publishedDuringLoad.clear();
+      });
       _showError("Couldn't load events. Pull to refresh or try again later.");
     }
   }
@@ -361,7 +493,6 @@ class _HomePageState extends State<HomePage> {
     _searchFocus.dispose();
     _clubRevision.dispose();
     _rsvpVisibility.dispose();
-    _profileVisibility.dispose();
     _social
       ..removeListener(_onSocialChanged)
       ..dispose();
@@ -393,6 +524,8 @@ class _HomePageState extends State<HomePage> {
   void _browseClubs({String query = ''}) => _openLivePage(
     () => ClubDirectoryPage(
       initialQuery: query,
+      organizationNames: _otherOrganizations,
+      onOpenOrganization: _openGroup,
       followedIds: _clubProfile.followedClubIds,
       onFollow: _toggleFollow,
       onOpen: _openClub,
@@ -401,6 +534,11 @@ class _HomePageState extends State<HomePage> {
 
   void _openFollowing() => _openLivePage(
     () => FollowingPage(
+      temporaryPreferences: _usingLocalOrganizationFollows,
+      organizationNames: _otherOrganizations,
+      onOpenOrganization: _openGroup,
+      autoRsvpIds: _clubProfile.clubAutoRsvpOptIns.keys,
+      autoRsvpAction: _autoRsvpAction,
       followedIds: _clubProfile.followedClubIds,
       notificationIds: _clubProfile.clubNotificationOptIns.keys,
       onFollow: _toggleFollow,
@@ -424,41 +562,13 @@ class _HomePageState extends State<HomePage> {
               ListTile(
                 title: Text(event.title),
                 subtitle: Text(clubsById[event.clubId]?.name ?? event.club),
-                onTap: () => _openClubById(event.clubId),
+                onTap: () => _openOrganizer(event),
               ),
           ],
         ),
       ),
     ),
   );
-
-  void _openMemberships() => _openLivePage(
-    () => Scaffold(
-      appBar: AppBar(title: const Text('Your Club Memberships')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            YourClubs(
-              memberships: _clubProfile.memberships,
-              onEdit: _editClubs,
-              onRemove: _removeClub,
-              onVisibilityChanged: (id, value) =>
-                  _updateClub(id, showOnProfile: value),
-              onAutoRsvpChanged: (id, value) =>
-                  _updateClub(id, autoRsvp: value),
-              onOpenClub: _openClubById,
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  void _openClubById(String? id) {
-    final club = clubsById[id];
-    if (club != null) _openClub(club);
-  }
 
   void _openClub(ClubOrganization club) => _openLivePage(() {
     final schedule = ClubEventSchedule(_events.values, club.id, DateTime.now());
@@ -471,6 +581,8 @@ class _HomePageState extends State<HomePage> {
       notifications: _clubProfile.clubNotificationOptIns.containsKey(club.id),
       onFollow: () => _toggleFollow(club.id),
       onNotifications: (value) => _setNotifications(club.id, value),
+      autoRsvp: _clubProfile.clubAutoRsvpOptIns.containsKey(club.id),
+      onAutoRsvp: _autoRsvpAction(club.id),
       upcoming: cards(schedule.upcoming),
       past: cards(schedule.past.take(5)),
       undated: cards(schedule.undated),
@@ -478,16 +590,29 @@ class _HomePageState extends State<HomePage> {
     );
   });
 
-  /// Club avatar tap: catalog clubs get their full page; any other
-  /// organizer (faculty, committee...) gets the placeholder page.
+  void _openGroup(String id, String name) => _openLivePage(
+    () => OrganizationPage(
+      id: id,
+      name: name,
+      following: _clubProfile.followedClubIds.contains(id),
+      onFollow: () => _toggleFollow(id),
+      autoRsvp: _clubProfile.clubAutoRsvpOptIns.containsKey(id),
+      onAutoRsvp: _autoRsvpAction(id),
+    ),
+    route: OrganizationPage.routeFor(id),
+  );
+
   void _openOrganizer(ClubEvent event) {
-    final club = clubsById[event.clubId];
+    final id = event.clubId;
+    final club = clubsById[id];
     if (club != null) return _openClub(club);
-    final id = OrganizationPage.idFor(event.club);
+    if (id != null && id.isNotEmpty) return _openGroup(id, event.club);
+
+    final routeId = OrganizationPage.idFor(event.club);
     _openPage(
       context,
-      OrganizationPage(id: id, name: event.club),
-      route: OrganizationPage.routeFor(id),
+      OrganizationPage(id: routeId, name: event.club),
+      route: OrganizationPage.routeFor(routeId),
     );
   }
 
@@ -545,6 +670,7 @@ class _HomePageState extends State<HomePage> {
           (_events[decision.key]!, visibility),
     ];
 
+    final selectedIndex = _destinations.indexOf(_destination);
     return Scaffold(
       appBar: AppBar(
         backgroundColor: McMapColors.red,
@@ -560,10 +686,7 @@ class _HomePageState extends State<HomePage> {
             tooltip: 'Settings',
             onPressed: () => _openPage(
               context,
-              SettingsPage(
-                rsvpVisibility: _rsvpVisibility,
-                profileVisibility: _profileVisibility,
-              ),
+              SettingsPage(rsvpVisibility: _rsvpVisibility),
             ),
             icon: const Icon(Icons.settings_outlined),
           ),
@@ -578,15 +701,13 @@ class _HomePageState extends State<HomePage> {
       ),
       body: SafeArea(
         child: IndexedStack(
-          index: _selectedIndex,
+          index: selectedIndex,
           children: [
             ListView(
               controller: _homeScroll,
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
-                Text('Find club events', style: text.headlineMedium),
-                const SizedBox(height: 16),
                 SearchBar(
                   controller: _homeSearch,
                   focusNode: _searchFocus,
@@ -719,7 +840,14 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const Center(child: Text('Campus map is coming soon.')),
+            if (_publishingGroups.isNotEmpty)
+              CreateEventPage(
+                backend: widget.backend!,
+                groups: _publishingGroups,
+                onPublished: _onEventPublished,
+              ),
             ListView(
+              key: const ValueKey(_Destination.profile),
               primary: false,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
@@ -745,43 +873,13 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton(
-                      onPressed: _openMemberships,
-                      child: Text(
-                        '${_clubProfile.memberships.length} Club Memberships',
-                      ),
-                    ),
-                    OutlinedButton(
-                      onPressed: _openFollowing,
-                      child: Text(
-                        '${_clubProfile.followedClubIds.length} Following',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                ProfileClubMemberships(
-                  profile: _clubProfile,
-                  onOpen: _openClub,
-                ),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: () => _openLivePage(
-                      () => ValueListenableBuilder(
-                        valueListenable: _profileVisibility,
-                        builder: (_, visibility, _) => PublicProfilePreview(
-                          profile: _clubProfile,
-                          presentation: _profile,
-                          visibility: visibility,
-                        ),
-                      ),
+                  child: OutlinedButton(
+                    onPressed: _openFollowing,
+                    child: Text(
+                      '${_clubProfile.followedClubIds.length} Following',
                     ),
-                    child: const Text('Preview Public Profile'),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -795,20 +893,26 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
+        selectedIndex: selectedIndex,
         onDestinationSelected: _selectDestination,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home_rounded),
             label: 'Home',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map_rounded),
             label: 'Map',
           ),
-          NavigationDestination(
+          if (_publishingGroups.isNotEmpty)
+            const NavigationDestination(
+              icon: Icon(Icons.add_circle_outline_rounded),
+              selectedIcon: Icon(Icons.add_circle_rounded),
+              label: 'Create',
+            ),
+          const NavigationDestination(
             icon: Icon(Icons.person_outline_rounded),
             selectedIcon: Icon(Icons.person_rounded),
             label: 'Profile',
@@ -879,8 +983,9 @@ class _HomePageState extends State<HomePage> {
 
   void _selectDestination(int index) {
     FocusScope.of(context).unfocus();
-    if (index == _selectedIndex) {
-      if (index == 0 && _homeScroll.hasClients) {
+    final destination = _destinations[index];
+    if (destination == _destination) {
+      if (destination == _Destination.home && _homeScroll.hasClients) {
         unawaited(
           _homeScroll.animateTo(
             _homeScroll.position.minScrollExtent,
@@ -891,7 +996,7 @@ class _HomePageState extends State<HomePage> {
       }
       return;
     }
-    setState(() => _selectedIndex = index);
+    setState(() => _destination = destination);
   }
 }
 

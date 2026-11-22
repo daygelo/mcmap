@@ -23,8 +23,7 @@ List<ClubFeedEntry> buildClubEventFeed(
   for (final event in events) {
     if (!event.isListedAt(now)) continue;
     final club = clubsById[event.clubId];
-    if (followedOnly != null &&
-        (club == null || !followedOnly.contains(club.id))) {
+    if (followedOnly != null && !followedOnly.contains(event.clubId)) {
       continue;
     }
     order[event.id] = order.length;

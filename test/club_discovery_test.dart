@@ -10,7 +10,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/models/club_event.dart';
 import 'package:mcmap/models/user_profile.dart';
-import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/student/club_discovery.dart';
 import 'package:mcmap/pages/student/suggested_clubs.dart';
@@ -44,7 +43,6 @@ Future<void> _search(WidgetTester tester, String query) async {
 
 Future<void> _start(
   WidgetTester tester, {
-  Map<String, ClubMembership> memberships = const {},
   Set<String> followed = const {},
   Set<String> interests = const {},
   Stream<ClubEvent>? publications,
@@ -60,7 +58,6 @@ Future<void> _start(
           faculty: 'Engineering',
           major: 'Software Engineering',
           year: 'U2',
-          memberships: memberships,
           followedClubIds: followed,
           interests: interests,
         ),
@@ -279,7 +276,7 @@ void main() {
       tester.widget<SearchBar>(find.byType(SearchBar)).controller!.text,
       'science',
     );
-    expect(find.text('Find club events').hitTestable(), findsOneWidget);
+    expect(find.byType(SearchBar).hitTestable(), findsOneWidget);
   });
 
   testWidgets(
@@ -309,7 +306,7 @@ void main() {
       });
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
-      await _start(tester, memberships: {_esportsId: const ClubMembership()});
+      await _start(tester);
       await _tapText(tester, 'Profile');
 
       int stat(String label) => tester
@@ -340,10 +337,9 @@ void main() {
 
       await _tap(tester, find.byType(EditableProfileAvatar));
       await choosePhoto(0);
-      await _tapText(tester, '1 Club Memberships');
-      await _tapText(tester, 'Show membership on profile');
-      await _tapText(tester, "Auto-RSVP to this club's events");
-      await _tapText(tester, _name(_esportsId));
+      await _tapText(tester, '0 Following');
+      await _tapText(tester, 'Browse Clubs');
+      await _search(tester, 'MESA');
       await _tapText(tester, 'Follow');
       await _back(tester);
       await _back(tester);
@@ -373,37 +369,9 @@ void main() {
             .avatarBytes,
         orderedEquals(bytes[1]),
       );
-      await _tapText(tester, '1 Club Memberships');
-      expect(
-        tester
-            .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, 'Show membership on profile'),
-            )
-            .value,
-        isTrue,
-      );
-      expect(
-        tester
-            .widget<SwitchListTile>(
-              find.widgetWithText(
-                SwitchListTile,
-                "Auto-RSVP to this club's events",
-              ),
-            )
-            .value,
-        isTrue,
-      );
-      await _tapText(tester, 'Remove club');
+      await _tapText(tester, '1 Following');
+      expect(find.text(_name(_esportsId)), findsOneWidget);
       await _back(tester);
-      expect(find.text('0 Club Memberships'), findsOneWidget);
-      expect(find.text('1 Following'), findsOneWidget);
-      expect(
-        tester
-            .widget<ProfileHeader>(find.byType(ProfileHeader))
-            .profile
-            .avatarBytes,
-        orderedEquals(bytes[1]),
-      );
 
       await _tapText(tester, 'Home');
       await _search(tester, 'Amir Haddad');
@@ -577,8 +545,7 @@ void main() {
       isTrue,
     );
     await _tapText(tester, 'Profile');
-    expect(find.text('0 Club Memberships'), findsOneWidget);
-    expect(find.text('No memberships are shown on Profile.'), findsOneWidget);
+    expect(find.textContaining('Club Memberships'), findsNothing);
     await _tapText(tester, '1 Following');
     expect(robotics.hitTestable(), findsOneWidget);
     await _tapText(tester, 'Unfollow');
@@ -607,132 +574,57 @@ void main() {
   });
 
   testWidgets(
-    'shows only revealed memberships and previews profile audiences',
+    'organization follow and unfollow sync across the directory and Profile',
     (tester) async {
-      await _start(
-        tester,
-        memberships: {
-          _esportsId: const ClubMembership(),
-          _boardGamesId: const ClubMembership(),
-        },
-      );
-      await _tapText(tester, 'Profile');
-      expect(find.text(_name(_esportsId)).hitTestable(), findsNothing);
-      await _tapText(tester, '2 Club Memberships');
-      final visibility = find.widgetWithText(
-        SwitchListTile,
-        'Show membership on profile',
-      );
-      await _tap(tester, visibility.first);
-      await _back(tester);
-      expect(find.text(_name(_esportsId)).hitTestable(), findsOneWidget);
-      expect(find.text(_name(_boardGamesId)).hitTestable(), findsNothing);
-      await _tapText(tester, 'Preview Public Profile');
-      expect(find.textContaining('Your profile is private'), findsOneWidget);
-      expect(find.text(_name(_esportsId)), findsNothing);
-      await _back(tester);
-
-      await _tap(tester, find.byTooltip('Settings'));
-      await _tap(
-        tester,
-        find.widgetWithText(RadioListTile<StudentVisibility>, 'Friends').last,
-      );
-      await _back(tester);
-      await _tapText(tester, 'Preview Public Profile');
-      expect(find.textContaining('permitted friends'), findsOneWidget);
-      expect(find.text(_name(_esportsId)), findsOneWidget);
-      expect(find.text(_name(_boardGamesId)), findsNothing);
-      expect(find.text('Your RSVPs'), findsNothing);
-      expect(find.text('0 Following'), findsNothing);
-      expect(find.text("Auto-RSVP to this club's events"), findsNothing);
-      await _back(tester);
-
-      await _tap(tester, find.byTooltip('Settings'));
-      await _tap(
-        tester,
-        find.widgetWithText(RadioListTile<StudentVisibility>, 'Public').last,
-      );
-      await _back(tester);
-      await _tapText(tester, 'Preview Public Profile');
+      await _start(tester);
+      await _tapText(tester, 'Following');
       expect(
-        find.textContaining('other McMap students would see'),
+        find.text('Follow clubs to see their events here.'),
         findsOneWidget,
       );
+      await _tapText(tester, 'Discover Clubs');
+      await _tapText(tester, 'See all clubs');
+      await _search(tester, 'MESA');
+      await _tapText(tester, _name(_esportsId));
+      await _tapText(tester, 'Follow');
+      await _back(tester);
+      expect(find.widgetWithText(OutlinedButton, 'Following'), findsOneWidget);
+      await _search(tester, 'board game');
+      await _tapText(tester, 'Follow');
+      await _back(tester);
+
+      await _tapText(tester, 'Map');
+      expect(
+        find.text('Campus map is coming soon.').hitTestable(),
+        findsOneWidget,
+      );
+      await _tapText(tester, 'Home');
+      await _tapText(tester, 'See all clubs');
+      await _search(tester, 'board game');
+      expect(find.widgetWithText(OutlinedButton, 'Following'), findsOneWidget);
+      await _back(tester);
+      await _tapText(tester, 'Profile');
+      expect(find.textContaining('Club Memberships'), findsNothing);
+      await _tapText(tester, '2 Following');
       expect(find.text(_name(_esportsId)), findsOneWidget);
+      expect(find.text(_name(_boardGamesId)), findsOneWidget);
+      final boardRow = find.widgetWithText(ListTile, _name(_boardGamesId));
+      await _tap(
+        tester,
+        find.descendant(
+          of: boardRow,
+          matching: find.widgetWithText(OutlinedButton, 'Unfollow'),
+        ),
+      );
       expect(find.text(_name(_boardGamesId)), findsNothing);
       await _back(tester);
+      expect(find.text('1 Following'), findsOneWidget);
 
-      await _tapText(tester, '2 Club Memberships');
-      await _tap(tester, visibility.first);
+      await _tapText(tester, '1 Following');
       expect(find.text(_name(_esportsId)), findsOneWidget);
-      await _back(tester);
-      expect(find.text('2 Club Memberships'), findsOneWidget);
-      expect(find.text(_name(_esportsId)).hitTestable(), findsNothing);
+      expect(find.text(_name(_boardGamesId)), findsNothing);
     },
   );
-
-  testWidgets('following and joining are independent and list changes sync', (
-    tester,
-  ) async {
-    await _start(tester);
-    await _tapText(tester, 'Following');
-    expect(find.text('Follow clubs to see their events here.'), findsOneWidget);
-    await _tapText(tester, 'Discover Clubs');
-    await _tapText(tester, 'See all clubs');
-    await _search(tester, 'MESA');
-    await _tapText(tester, _name(_esportsId));
-    await _tapText(tester, 'Follow');
-    await _back(tester);
-    expect(find.widgetWithText(OutlinedButton, 'Following'), findsOneWidget);
-    await _search(tester, 'board game');
-    await _tapText(tester, 'Follow');
-    await _back(tester);
-
-    await _tapText(tester, 'Map');
-    expect(
-      find.text('Campus map is coming soon.').hitTestable(),
-      findsOneWidget,
-    );
-    await _tapText(tester, 'Home');
-    await _tapText(tester, 'See all clubs');
-    await _search(tester, 'board game');
-    expect(find.widgetWithText(OutlinedButton, 'Following'), findsOneWidget);
-    await _back(tester);
-    await _tapText(tester, 'Profile');
-    expect(find.text('0 Club Memberships'), findsOneWidget);
-    await _tapText(tester, '2 Following');
-    expect(find.text(_name(_esportsId)), findsOneWidget);
-    expect(find.text(_name(_boardGamesId)), findsOneWidget);
-    final boardRow = find.widgetWithText(ListTile, _name(_boardGamesId));
-    await _tap(
-      tester,
-      find.descendant(
-        of: boardRow,
-        matching: find.widgetWithText(OutlinedButton, 'Unfollow'),
-      ),
-    );
-    expect(find.text(_name(_boardGamesId)), findsNothing);
-    await _back(tester);
-    expect(find.text('1 Following'), findsOneWidget);
-
-    await _tapText(tester, '0 Club Memberships');
-    await _tapText(tester, 'Add Clubs');
-    await _search(tester, 'board game');
-    await _tapText(tester, _name(_boardGamesId));
-    await _tapText(tester, 'Save Clubs');
-    await _back(tester);
-    expect(find.text('1 Club Memberships'), findsOneWidget);
-    await _tapText(tester, '1 Club Memberships');
-    final autoRsvp = find.widgetWithText(
-      SwitchListTile,
-      "Auto-RSVP to this club's events",
-    );
-    expect(tester.widget<SwitchListTile>(autoRsvp).value, isFalse);
-    await _back(tester);
-    await _tapText(tester, '1 Following');
-    expect(find.text(_name(_esportsId)), findsOneWidget);
-    expect(find.text(_name(_boardGamesId)), findsNothing);
-  });
 
   testWidgets('combines following and search and shares RSVPs across pages', (
     tester,
@@ -838,7 +730,124 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets(
-    'private club management keeps hiding separate from RSVP opt-in and removal',
+    'auto-RSVP switches sync and apply only to eligible followed organizers',
+    (tester) async {
+      final publications = StreamController<ClubEvent>();
+      addTearDown(publications.close);
+      await _start(tester, publications: publications.stream);
+      const facultyId = 'faculty-of-science';
+      const faculty = 'Faculty of Science';
+      const autoLabel = 'Auto-RSVP to events';
+      final autoSwitch = find.widgetWithText(SwitchListTile, autoLabel);
+      final private = find.text('Going · Demo visibility: Private');
+
+      Future<ClubEvent> publish(
+        String title,
+        String id, {
+        String? name,
+        bool unrestricted = true,
+        DateTime? publishedAt,
+      }) async {
+        final event = ClubEvent(
+          title,
+          title,
+          name ?? _name(id),
+          'Tomorrow',
+          'Campus',
+          clubId: id,
+          publishedAt: publishedAt ?? DateTime.now(),
+          startsAt: DateTime.now().add(const Duration(days: 1)),
+          supportsUnrestrictedRsvp: unrestricted,
+        );
+        publications.add(event);
+        await tester.pumpAndSettle();
+        return event;
+      }
+
+      await publish('Faculty welcome', facultyId, name: faculty);
+      await _tapText(tester, 'Profile');
+      await _tapText(tester, '0 Following');
+      await _tapText(tester, 'Browse Clubs');
+      await _search(tester, 'MESA');
+      await _tapText(tester, _name(_esportsId));
+      expect(autoSwitch, findsNothing);
+      await _tapText(tester, 'Follow');
+      expect(tester.widget<SwitchListTile>(autoSwitch).value, isFalse);
+      final notifications = find.widgetWithText(
+        SwitchListTile,
+        'Notify me about new events',
+      );
+      expect(tester.widget<SwitchListTile>(notifications).value, isFalse);
+      await _tap(tester, autoSwitch);
+      expect(tester.widget<SwitchListTile>(autoSwitch).value, isTrue);
+      await _back(tester);
+      await _back(tester);
+      expect(tester.widget<SwitchListTile>(autoSwitch).value, isTrue);
+      await _back(tester);
+
+      await publish(
+        'Before consent',
+        _esportsId,
+        publishedAt: DateTime.now().subtract(const Duration(days: 1)),
+      );
+      final first = await publish('Club workshop', _esportsId);
+      publications.add(first);
+      await tester.pumpAndSettle();
+      await publish('Other club', _boardGamesId);
+      await publish('Paid workshop', _esportsId, unrestricted: false);
+      expect(private.hitTestable(), findsOneWidget);
+      expect(find.text('Club workshop').hitTestable(), findsOneWidget);
+      expect(find.text('Paid workshop').hitTestable(), findsNothing);
+      await _tapText(tester, 'Cancel RSVP');
+      publications.add(first);
+      await tester.pumpAndSettle();
+      expect(private.hitTestable(), findsNothing);
+
+      await _tapText(tester, '1 Following');
+      await _tap(tester, autoSwitch);
+      await _tapText(tester, _name(_esportsId));
+      expect(tester.widget<SwitchListTile>(autoSwitch).value, isFalse);
+      await _back(tester);
+      await _tapText(tester, 'Browse Clubs');
+      await _search(tester, faculty);
+      await _tap(tester, find.widgetWithText(ListTile, faculty));
+      await _tapText(tester, 'Follow');
+      expect(tester.widget<SwitchListTile>(autoSwitch).value, isFalse);
+      await _tap(tester, autoSwitch);
+      await _back(tester);
+      await _back(tester);
+      expect(
+        tester.widgetList<SwitchListTile>(autoSwitch).map((item) => item.value),
+        [false, true],
+      );
+      await _back(tester);
+
+      await publish('While disabled', _esportsId);
+      await publish(
+        'Same name, other slug',
+        'different-faculty',
+        name: faculty,
+      );
+      await publish('Faculty seminar', facultyId, name: faculty);
+      expect(private.hitTestable(), findsOneWidget);
+      expect(find.text('Faculty seminar').hitTestable(), findsOneWidget);
+      await _tapText(tester, '2 Following');
+      final club = find.widgetWithText(ListTile, _name(_esportsId));
+      await _tap(
+        tester,
+        find.descendant(of: club, matching: find.text('Unfollow')),
+      );
+      await _back(tester);
+      await publish('After unfollow', _esportsId);
+      expect(private.hitTestable(), findsOneWidget);
+      expect(find.text('Faculty seminar').hitTestable(), findsOneWidget);
+      expect(find.text('1 Following'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'existing auto-RSVP opt-in works until unfollow and preserves RSVP decisions',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1000, 1500));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -848,12 +857,15 @@ void main() {
         MaterialApp(
           theme: buildMcMapTheme(),
           home: HomePage(
-            profile: const UserProfile(
+            profile: UserProfile(
               degreeLevel: DegreeLevel.undergraduate,
               faculty: 'Engineering',
               major: 'Software Engineering',
               year: 'U2',
-              memberships: {_esportsId: ClubMembership()},
+              followedClubIds: const {_esportsId},
+              clubAutoRsvpOptIns: {
+                _esportsId: DateTime.now().subtract(const Duration(hours: 1)),
+              },
             ),
             publications: publications.stream,
           ),
@@ -861,29 +873,6 @@ void main() {
       );
       await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('1 Club Memberships'));
-      await tester.pumpAndSettle();
-      final visibility = find.widgetWithText(
-        SwitchListTile,
-        'Show membership on profile',
-      );
-      final auto = find.widgetWithText(
-        SwitchListTile,
-        "Auto-RSVP to this club's events",
-      );
-      expect(tester.widget<SwitchListTile>(visibility).value, isFalse);
-      expect(tester.widget<SwitchListTile>(auto).value, isFalse);
-      await tester.tap(visibility);
-      await tester.pumpAndSettle();
-      expect(tester.widget<SwitchListTile>(visibility).value, isTrue);
-      await tester.tap(auto);
-      await tester.pumpAndSettle();
-      await tester.tap(visibility);
-      await tester.pumpAndSettle();
-      expect(tester.widget<SwitchListTile>(visibility).value, isFalse);
-      expect(tester.widget<SwitchListTile>(auto).value, isTrue);
-      expect(find.text(_name(_esportsId)).hitTestable(), findsOneWidget);
-
       ClubEvent published(String id) => ClubEvent(
         id,
         id,
@@ -896,8 +885,6 @@ void main() {
         supportsUnrestrictedRsvp: true,
       );
 
-      await tester.pageBack();
-      await tester.pumpAndSettle();
       final first = published('New club event');
       publications.add(first);
       publications.add(first);
@@ -906,12 +893,11 @@ void main() {
         find.text('Going · Demo visibility: Private').hitTestable(),
         findsOneWidget,
       );
-      await tester.tap(find.text('1 Club Memberships'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Remove club'));
+      await _tapText(tester, '1 Following');
+      await tester.tap(find.text('Unfollow'));
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('You have no club memberships.').hitTestable(),
+        find.text("You're not following any clubs yet.").hitTestable(),
         findsOneWidget,
       );
       await tester.pageBack();

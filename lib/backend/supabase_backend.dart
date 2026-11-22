@@ -38,6 +38,13 @@ class SupabaseBackend implements McMapBackend {
 
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
+    final uid = _uid;
+    if (profile.followedClubIds.isNotEmpty) {
+      await client.rpc<void>(
+        'change_organization_follows',
+        params: {'follow_ids': profile.followedClubIds.toList()},
+      );
+    }
     await client
         .from('profiles')
         .update({
@@ -51,8 +58,83 @@ class SupabaseBackend implements McMapBackend {
           'interests': profile.interests.toList(),
           'onboarding_completed': true,
         })
-        .eq('id', _uid);
+        .eq('id', uid);
     _profileRevision.value++;
+  }
+
+  @override
+  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await client
+          .from('profile_organization_follows')
+          .select('follows')
+          .eq('profile_id', _uid);
+    } on PostgrestException catch (error) {
+      if (isMissingOrganizationFollowsTable(error)) {
+        throw const OrganizationFollowsUnavailable();
+      }
+      rethrow;
+    }
+    final follows =
+        rows.firstOrNull?['follows'] as Map<String, dynamic>? ?? const {};
+    return {
+      for (final entry in follows.entries)
+        entry.key: switch (entry.value) {
+          {'auto_rsvp_enabled_at': final String value} => DateTime.tryParse(
+            value,
+          ),
+          _ => null,
+        },
+    };
+  }
+
+  @visibleForTesting
+  static bool isMissingOrganizationFollowsTable(PostgrestException error) =>
+      switch (error.code) {
+        'PGRST205' => error.message.contains(
+          "Could not find the table 'public.profile_organization_follows'",
+        ),
+        '42P01' => error.message.contains(
+          'relation "public.profile_organization_follows" does not exist',
+        ),
+        _ => false,
+      };
+
+  @override
+  Future<void> setOrganizationFollow(String id, bool following) =>
+      client.rpc<void>(
+        'change_organization_follows',
+        params: {
+          'follow_ids': following ? [id] : <String>[],
+          if (!following) 'unfollow_id': id,
+        },
+      );
+
+  @override
+  Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled) async {
+    final consent = await client.rpc<String?>(
+      'set_organization_auto_rsvp',
+      params: {'group_slug': id, 'enabled': enabled},
+    );
+    return consent == null ? null : DateTime.parse(consent);
+  }
+
+  @override
+  Future<Map<String, String>> fetchOrganizationNames() async {
+    const pageSize = 500;
+    final names = <String, String>{};
+    for (var offset = 0; ; offset += pageSize) {
+      final rows = await client
+          .from('groups')
+          .select('slug, name')
+          .order('slug')
+          .range(offset, offset + pageSize - 1);
+      for (final row in rows) {
+        names[row['slug'] as String] = row['name'] as String;
+      }
+      if (rows.length < pageSize) return names;
+    }
   }
 
   @override
@@ -109,14 +191,62 @@ class SupabaseBackend implements McMapBackend {
   // Events & RSVPs
   // -------------------------------------------------------------------------
 
+  static const _eventColumns = '*, groups(slug, name, avatar_url)';
+
   @override
   Future<List<ClubEvent>> fetchEvents() async {
+    const pageSize = 500;
+    final events = <ClubEvent>[];
+    for (var offset = 0; ; offset += pageSize) {
+      final rows = await client
+          .from('events')
+          .select(_eventColumns)
+          .order('starts_at', ascending: true, nullsFirst: false)
+          .order('id', ascending: true)
+          .range(offset, offset + pageSize - 1);
+      events.addAll(rows.map(_event));
+      if (rows.length < pageSize) return events;
+    }
+  }
+
+  @override
+  Future<List<PublishingGroup>> fetchPublishingGroups() async {
     final rows = await client
-        .from('events')
-        .select('*, groups(slug, name, avatar_url)')
-        .order('starts_at', ascending: true, nullsFirst: false)
-        .limit(500);
-    return [for (final row in rows) _event(row)];
+        .from('group_publishers')
+        .select('group_id, groups!inner(name)')
+        .eq('profile_id', _uid);
+    return [
+      for (final row in rows)
+        PublishingGroup(
+          id: row['group_id'] as String,
+          name: row['groups']['name'] as String,
+        ),
+    ]..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  @override
+  Future<ClubEvent> publishEvent({
+    required String eventId,
+    required String groupId,
+    required String title,
+    required String description,
+    required DateTime startsAt,
+    DateTime? endsAt,
+    required String location,
+  }) async {
+    final row = await client.rpc<Map<String, dynamic>>(
+      'publish_event',
+      params: {
+        'event_id': eventId,
+        'organization_id': groupId,
+        'event_title': title,
+        'event_description': description,
+        'event_start': startsAt.toUtc().toIso8601String(),
+        'event_end': endsAt?.toUtc().toIso8601String(),
+        'event_location': location,
+      },
+    );
+    return _event(row);
   }
 
   @override
@@ -240,6 +370,7 @@ class SupabaseBackend implements McMapBackend {
       isFrosh: row['is_froshie_event'] == true,
       publishedAt: time('published_at'),
       startsAt: time('starts_at'),
+      endsAt: time('ends_at'),
       description: row['full_description'] as String?,
       synopsis: row['ai_synopsis'] as String?,
       latitude: number('latitude'),

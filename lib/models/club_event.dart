@@ -10,6 +10,7 @@ class ClubEvent {
     this.clubId,
     this.publishedAt,
     this.startsAt,
+    this.endsAt,
     this.description,
     this.synopsis,
     this.clubAvatarUrl,
@@ -29,10 +30,10 @@ class ClubEvent {
   final String? clubId;
   final DateTime? publishedAt;
   final DateTime? startsAt;
+  final DateTime? endsAt;
   final String? description;
 
-  /// 1–2 sentence AI-generated TL;DR of [description], shown on feed cards
-  /// with an "AI Summary" label. Generated server-side when the event is
+  /// 1–2 sentence AI-generated TL;DR of [description], shown on feed cards. Generated server-side when the event is
   /// published (TODO(ai): wire up the summarizer); null until then.
   final String? synopsis;
 

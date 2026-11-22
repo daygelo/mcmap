@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/initials_avatar.dart';
+import '../widgets/auto_rsvp_switch.dart';
+import 'student/club_discovery.dart';
 
 /// Placeholder Faculty / Club page (route `/organization/:id`), opened by
 /// tapping a club avatar on an event. Catalog clubs open the full
@@ -9,17 +11,29 @@ import '../widgets/initials_avatar.dart';
 /// catalog yet (faculties, committees, ...).
 ///
 /// TODO(organizations): replace the placeholder body with the real
-/// faculty/club data (about, links, upcoming events, follow button).
+/// faculty/club data (about, links, upcoming events).
 class OrganizationPage extends StatelessWidget {
-  const OrganizationPage({super.key, required this.id, required this.name});
+  const OrganizationPage({
+    super.key,
+    required this.id,
+    required this.name,
+    this.following = false,
+    this.autoRsvp = false,
+    this.onFollow,
+    this.onAutoRsvp,
+  });
 
   /// URL-safe id, e.g. `ssmu-frosh-committee`.
   final String id;
   final String name;
+  final bool following;
+  final bool autoRsvp;
+  final VoidCallback? onFollow;
+  final ValueChanged<bool>? onAutoRsvp;
 
   static String routeFor(String id) => '/organization/$id';
 
-  /// Stable id for an organizer that only has a display name.
+  /// Route fallback for a display-only organizer, never a follow ID.
   static String idFor(String name) => name
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
@@ -44,6 +58,19 @@ class OrganizationPage extends StatelessWidget {
                     Expanded(child: Text(name, style: text.headlineSmall)),
                   ],
                 ),
+                if (onFollow != null) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FollowClubButton(
+                      clubName: name,
+                      following: following,
+                      onPressed: onFollow,
+                    ),
+                  ),
+                  if (following)
+                    AutoRsvpSwitch(value: autoRsvp, onChanged: onAutoRsvp),
+                ],
                 const SizedBox(height: 24),
                 Container(
                   padding: const EdgeInsets.symmetric(

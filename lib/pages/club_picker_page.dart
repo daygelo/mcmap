@@ -4,21 +4,14 @@ import '../data/clubs.dart';
 
 /// Returns a draft selection on save, or null when the student goes back.
 class ClubPickerPage extends StatefulWidget {
-  const ClubPickerPage({
-    super.key,
-    this.initialSelection = const {},
-    this.onboarding = false,
-  });
-
-  final Set<String> initialSelection;
-  final bool onboarding;
+  const ClubPickerPage({super.key});
 
   @override
   State<ClubPickerPage> createState() => _ClubPickerPageState();
 }
 
 class _ClubPickerPageState extends State<ClubPickerPage> {
-  late final _selected = {...widget.initialSelection};
+  final _selected = <String>{};
   String _query = '';
 
   @override
@@ -26,9 +19,7 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
     final text = Theme.of(context).textTheme;
     final matches = clubCatalog.where((club) => club.matches(_query)).toList();
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.onboarding ? 'Step 3 of 3' : 'Edit Clubs'),
-      ),
+      appBar: AppBar(title: const Text('Step 3 of 3')),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -42,19 +33,12 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Which clubs are you a member of?',
+                          'Which groups would you like to follow?',
                           style: text.headlineMedium,
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          widget.onboarding
-                              ? "Select the McGill clubs you're part of. You can skip this step and update your clubs later."
-                              : 'Add or remove your self-reported memberships.',
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Selections are self-reported and do not enroll you in an organization.',
-                          style: text.bodySmall,
+                        const Text(
+                          'Follow McGill clubs, departments, and organizations to see their events. You can always change this later.',
                         ),
                         const SizedBox(height: 16),
                         SearchBar(
@@ -112,17 +96,16 @@ class _ClubPickerPageState extends State<ClubPickerPage> {
             spacing: 12,
             runSpacing: 8,
             children: [
-              if (widget.onboarding)
-                OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(const <String>{}),
-                  child: const Text('Skip for now'),
-                ),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(const <String>{}),
+                child: const Text('Skip for now'),
+              ),
               FilledButton(
-                onPressed: widget.onboarding && _selected.isEmpty
+                onPressed: _selected.isEmpty
                     ? null
                     : () =>
                           Navigator.of(context).pop(Set<String>.of(_selected)),
-                child: Text(widget.onboarding ? 'Continue' : 'Save Clubs'),
+                child: const Text('Continue'),
               ),
             ],
           ),

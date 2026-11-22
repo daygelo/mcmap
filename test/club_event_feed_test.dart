@@ -3,7 +3,7 @@ import 'package:mcmap/data/club_event_feed.dart';
 import 'package:mcmap/models/club_event.dart';
 
 void main() {
-  test('unverified publisher labels stay separate and outside Following', () {
+  test('a non-catalog organizer matches Following by its exact slug', () {
     const events = [
       ClubEvent('sample-one', 'Sample One', 'Same publisher', '', ''),
       ClubEvent(
@@ -26,8 +26,8 @@ void main() {
         now: now,
         query: '',
         followedOnly: {'unknown-club'},
-      ),
-      isEmpty,
+      ).map((entry) => entry.event.id),
+      ['sample-two'],
     );
   });
 

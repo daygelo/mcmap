@@ -1,15 +1,23 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+// Supabase's injected test transport uses its transitive HTTP dependency.
+// ignore: depend_on_referenced_packages
+import 'package:http/http.dart' as http;
+// ignore: depend_on_referenced_packages
+import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mcmap/backend/mcmap_backend.dart';
+import 'package:mcmap/backend/supabase_backend.dart';
 import 'package:mcmap/data/academics.dart';
 import 'package:mcmap/data/clubs.dart';
 import 'package:mcmap/main.dart';
 import 'package:mcmap/models/club_event.dart';
 import 'package:mcmap/models/student_visibility.dart';
 import 'package:mcmap/models/user_profile.dart';
+import 'package:mcmap/pages/event_details_page.dart';
 import 'package:mcmap/pages/home_page.dart';
 import 'package:mcmap/pages/login_page.dart';
 import 'package:mcmap/pages/onboarding/interests_page.dart';
@@ -17,6 +25,7 @@ import 'package:mcmap/pages/student/student_profile.dart';
 import 'package:mcmap/social/mcgillian_widgets.dart';
 import 'package:mcmap/social/social_graph.dart';
 import 'package:mcmap/theme/app_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// In-memory stand-in for Supabase that records what the app saved.
 class FakeBackend implements McMapBackend {
@@ -26,6 +35,15 @@ class FakeBackend implements McMapBackend {
   final added = <String>[];
   final removed = <String>[];
   bool failRsvp = false;
+  bool failFollowSave = false;
+  Exception? followLoadError;
+  Future<Map<String, DateTime?>> Function()? followLoader;
+  int followWrites = 0;
+  int autoRsvpWrites = 0;
+  final follows = <String, DateTime?>{};
+  List<PublishingGroup> publishingGroups = [];
+  Completer<void>? publicationPending;
+  int publicationCalls = 0;
 
   final events = [
     ClubEvent(
@@ -72,7 +90,41 @@ class FakeBackend implements McMapBackend {
   @override
   Future<void> completeOnboarding(UserProfile profile) async {
     savedOnboarding = profile;
+    for (final id in profile.followedClubIds) {
+      follows.putIfAbsent(id, () => null);
+    }
     _revision.value++;
+  }
+
+  @override
+  Future<Map<String, DateTime?>> fetchOrganizationFollows() async {
+    if (followLoadError case final error?) throw error;
+    return followLoader?.call() ?? {...follows};
+  }
+
+  @override
+  Future<void> setOrganizationFollow(String id, bool following) async {
+    followWrites++;
+    if (failFollowSave) throw StateError('offline');
+    if (following) {
+      follows.putIfAbsent(id, () => null);
+    } else {
+      follows.remove(id);
+    }
+  }
+
+  @override
+  Future<Map<String, String>> fetchOrganizationNames() async => {
+    'faculty-of-science': 'Faculty of Science',
+  };
+
+  @override
+  Future<DateTime?> setOrganizationAutoRsvp(String id, bool enabled) async {
+    autoRsvpWrites++;
+    if (failFollowSave || !follows.containsKey(id)) {
+      throw StateError('Cannot save preference');
+    }
+    return follows[id] = enabled ? DateTime.now() : null;
   }
 
   @override
@@ -86,6 +138,38 @@ class FakeBackend implements McMapBackend {
 
   @override
   Future<List<ClubEvent>> fetchEvents() async => events;
+
+  @override
+  Future<List<PublishingGroup>> fetchPublishingGroups() async =>
+      publishingGroups;
+
+  @override
+  Future<ClubEvent> publishEvent({
+    required String eventId,
+    required String groupId,
+    required String title,
+    required String description,
+    required DateTime startsAt,
+    DateTime? endsAt,
+    required String location,
+  }) async {
+    publicationCalls++;
+    final group = publishingGroups.singleWhere((group) => group.id == groupId);
+    await publicationPending?.future;
+    final event = ClubEvent(
+      eventId,
+      title,
+      group.name,
+      '',
+      location,
+      clubId: group.id,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      description: description,
+    );
+    events.add(event);
+    return event;
+  }
 
   @override
   Future<Map<String, StudentVisibility>> fetchMyRsvps() async => {};
@@ -131,11 +215,16 @@ const _profile = UserProfile(
   major: 'Biology',
 );
 
-Future<FakeBackend> _pumpHome(WidgetTester tester) async {
+Future<FakeBackend> _pumpHome(
+  WidgetTester tester, {
+  List<PublishingGroup> publishingGroups = const [],
+  FakeBackend? existingBackend,
+}) async {
   tester.view.physicalSize = const Size(900, 2400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final backend = FakeBackend();
+  final backend = (existingBackend ?? FakeBackend())
+    ..publishingGroups = publishingGroups;
   await tester.pumpWidget(
     MaterialApp(
       theme: buildMcMapTheme(),
@@ -154,7 +243,370 @@ Future<FakeBackend> _pumpHome(WidgetTester tester) async {
   return backend;
 }
 
+const _followingProfileId = '00000000-0000-4000-8000-000000000001';
+const _missingFollowing = {
+  'code': 'PGRST205',
+  'message': "Could not find the table 'public.profile_organization_follows' in the schema cache",
+  'details': null,
+  'hint': null,
+};
+
+http.Response _jsonResponse(Object body, [int status = 200]) => http.Response(
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
+
+Future<SupabaseBackend> _supabaseFollowing(
+  http.Response Function() response,
+) async {
+  final client = SupabaseClient(
+    'https://mcmap.test',
+    'test-publishable-key',
+    httpClient: MockClient((request) async {
+      if (request.url.path == '/auth/v1/token') {
+        return _jsonResponse({
+          'access_token': 'eyJhbGciOiJub25lIn0.e30.fake',
+          'refresh_token': 'test-refresh-token',
+          'token_type': 'bearer',
+          'user': {
+            'id': _followingProfileId,
+            'aud': 'authenticated',
+            'created_at': '2026-11-21T00:00:00Z',
+          },
+        });
+      }
+      expect(request.method, 'GET');
+      expect(request.url.path, '/rest/v1/profile_organization_follows');
+      expect(request.url.queryParameters, {
+        'select': 'follows',
+        'profile_id': 'eq.$_followingProfileId',
+      });
+      final result = response();
+      return http.Response(
+        result.body,
+        result.statusCode,
+        headers: result.headers,
+        request: request,
+      );
+    }),
+  );
+  addTearDown(client.dispose);
+  await client.auth.signInWithPassword(
+    email: 'student@mcgill.ca',
+    password: 'test-password',
+  );
+  return SupabaseBackend(client);
+}
+
 void main() {
+  test('only a missing Following table matches the Supabase fallback', () {
+    const schemaCache = PostgrestException(
+      code: 'PGRST205',
+      message: "Could not find the table 'public.profile_organization_follows' in the schema cache",
+    );
+    const undefinedRelation = PostgrestException(
+      code: '42P01',
+      message: 'relation "public.profile_organization_follows" does not exist',
+    );
+    final matches = SupabaseBackend.isMissingOrganizationFollowsTable;
+    expect(matches(schemaCache), isTrue);
+    expect(matches(undefinedRelation), isTrue);
+    for (final error in [
+      const PostgrestException(
+        code: 'PGRST205',
+        message: "Could not find the table 'public.groups' in the schema cache",
+      ),
+      const PostgrestException(
+        code: '42501',
+        message: 'permission denied for table profile_organization_follows',
+      ),
+      const PostgrestException(code: 'PGRST301', message: 'JWT expired'),
+      const PostgrestException(code: '503', message: 'network unavailable'),
+    ]) {
+      expect(matches(error), isFalse);
+    }
+  });
+
+  test('Supabase Following maps a stored row and an empty result', () async {
+    var payload = <Object>[
+      {
+        'follows': {
+          'faculty-of-science': {
+            'auto_rsvp_enabled_at': '2026-11-21T12:00:00Z',
+          },
+          'engineering-mcgill-robotics': <String, Object>{},
+        },
+      },
+    ];
+    final backend = await _supabaseFollowing(() => _jsonResponse(payload));
+    expect(await backend.fetchOrganizationFollows(), {
+      'faculty-of-science': DateTime.utc(2026, 11, 21, 12),
+      'engineering-mcgill-robotics': null,
+    });
+    payload = [];
+    expect(await backend.fetchOrganizationFollows(), isEmpty);
+  });
+
+  test(
+    'Supabase Following preserves permission, auth and unrelated 404 errors',
+    () async {
+      var error = _missingFollowing;
+      var status = 404;
+      final backend = await _supabaseFollowing(
+        () => _jsonResponse(error, status),
+      );
+      for (final (code, message, httpStatus) in [
+        (
+          '42501',
+          'permission denied for table profile_organization_follows',
+          403,
+        ),
+        ('PGRST301', 'JWT expired', 401),
+        (
+          'PGRST205',
+          "Could not find the table 'public.groups' in the schema cache",
+          404,
+        ),
+      ]) {
+        error = {'code': code, 'message': message};
+        status = httpStatus;
+        await expectLater(
+          backend.fetchOrganizationFollows(),
+          throwsA(
+            isA<PostgrestException>().having(
+              (error) => error.code,
+              'code',
+              code,
+            ),
+          ),
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'missing Following storage keeps all organization edits session-only',
+    (tester) async {
+      var followReads = 0;
+      final supabase = (await tester.runAsync(
+        () => _supabaseFollowing(() {
+          followReads++;
+          return _jsonResponse(_missingFollowing, 404);
+        }),
+      ))!;
+      final backend = FakeBackend()
+        ..followLoader = supabase.fetchOrganizationFollows;
+      await _pumpHome(tester, existingBackend: backend);
+
+      Future<void> tap(String label) async {
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+      }
+
+      const notice =
+          'Following and event preferences are temporary for this session.';
+      final auto = find.widgetWithText(SwitchListTile, 'Auto-RSVP to events');
+      final notifications = find.widgetWithText(
+        SwitchListTile,
+        'Notify me about new events',
+      );
+      await tap('Profile');
+      await tap('0 Following');
+      expect(find.text(notice), findsOneWidget);
+      await tap('Browse Clubs');
+      await tester.enterText(find.byType(SearchBar), 'robotics');
+      await tester.pumpAndSettle();
+      await tap('McGill Robotics');
+      await tap('Follow');
+      expect(find.widgetWithText(OutlinedButton, 'Following'), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(auto).value, isFalse);
+      expect(tester.widget<SwitchListTile>(notifications).value, isFalse);
+      await tap('Auto-RSVP to events');
+      await tap('Notify me about new events');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(auto).value, isTrue);
+      expect(find.textContaining('Updates on'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tap('1 Following');
+      await tap('Unfollow');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tap('0 Following');
+      expect(find.text("You're not following any clubs yet."), findsOneWidget);
+      expect(followReads, 1);
+      expect(backend.followWrites, 0);
+      expect(backend.autoRsvpWrites, 0);
+      expect(backend.follows, isEmpty);
+      // A new session uses Supabase again when the table is available.
+      backend.followLoader = null;
+      backend.follows['faculty-of-science'] = null;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pumpHome(tester, existingBackend: backend);
+      await tap('Profile');
+      await tap('1 Following');
+      expect(find.text('Faculty of Science'), findsOneWidget);
+      expect(find.text(notice), findsNothing);
+      await tap('Auto-RSVP to events');
+      expect(backend.autoRsvpWrites, 1);
+    },
+  );
+
+  testWidgets('a permission failure does not enable local organization edits', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..followLoadError = const PostgrestException(
+        code: '42501',
+        message: 'permission denied',
+      );
+    await _pumpHome(tester, existingBackend: backend);
+    expect(
+      find.textContaining("Couldn't load followed organizations"),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('0 Following'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('temporary for this session'), findsNothing);
+    await tester.tap(find.text('Browse Clubs'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(SearchBar), 'robotics');
+    await tester.pumpAndSettle();
+    final row = find.widgetWithText(ListTile, 'McGill Robotics');
+    final follow = find.descendant(of: row, matching: find.text('Follow'));
+    await tester.tap(follow);
+    await tester.pumpAndSettle();
+    expect(follow, findsOneWidget);
+    expect(backend.followWrites, 0);
+  });
+
+  testWidgets('students have Home, Map and Profile navigation', (tester) async {
+    await _pumpHome(tester);
+    expect(find.text('Create'), findsNothing);
+    await tester.tap(find.text('Map'));
+    await tester.pumpAndSettle();
+    expect(find.text('Campus map is coming soon.'), findsOneWidget);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Your profile'), findsOneWidget);
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchBar).hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('organizers publish once for an assigned group', (tester) async {
+    final backend = await _pumpHome(
+      tester,
+      publishingGroups: const [
+        PublishingGroup(id: 'assigned-a', name: 'Assigned Organization A'),
+        PublishingGroup(id: 'assigned-b', name: 'Assigned Organization B'),
+      ],
+    );
+    backend.publicationPending = Completer<void>();
+    final navigation = tester.widget<NavigationBar>(find.byType(NavigationBar));
+    expect(
+      navigation.destinations.cast<NavigationDestination>().map(
+        (item) => item.label,
+      ),
+      ['Home', 'Map', 'Create', 'Profile'],
+    );
+
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    final publish = find.text('Publish event');
+    await tester.tap(publish);
+    await tester.pumpAndSettle();
+    for (final error in [
+      'Choose an authorized organization.',
+      'Enter an event title.',
+      'Enter a description.',
+      'Choose a start date and time.',
+      'Enter a location.',
+    ]) {
+      expect(find.text(error), findsOneWidget);
+    }
+    expect(backend.publicationCalls, 0);
+
+    final organizations = find.byType(DropdownButtonFormField<String>);
+    final selector = tester.widget<DropdownButtonFormField<String>>(
+      organizations,
+    );
+    expect(
+      tester
+          .widget<DropdownButton<String>>(
+            find.descendant(
+              of: organizations,
+              matching: find.byType(DropdownButton<String>),
+            ),
+          )
+          .items!
+          .map((item) => item.value),
+      ['assigned-a', 'assigned-b'],
+    );
+    expect(selector.initialValue, isNull);
+    await tester.tap(organizations);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Assigned Organization B').last);
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextFormField);
+    await tester.enterText(fields.at(0), '  Publisher Workshop  ');
+    await tester.enterText(fields.at(1), 'A full workshop description.');
+    await tester.enterText(fields.at(2), 'Leacock 132');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.tap(find.text('Choose start'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose start'), findsNothing);
+
+    await tester.tap(find.text('Choose end'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(publish);
+    await tester.tap(publish);
+    await tester.pump();
+    expect(backend.publicationCalls, 1);
+    expect(find.text('Publishing…'), findsOneWidget);
+
+    backend.publicationPending!.complete();
+    await tester.pumpAndSettle();
+    final event = (await backend.fetchEvents()).last;
+    expect(backend.events, hasLength(2));
+    expect(event.clubId, 'assigned-b');
+    expect(event.startsAt, isNotNull);
+    expect(event.endsAt, event.startsAt);
+    expect(event.title, 'Publisher Workshop');
+    expect(
+      tester.widget<EventDetailsPage>(find.byType(EventDetailsPage)).event.id,
+      event.id,
+    );
+    expect(find.text('A full workshop description.'), findsOneWidget);
+    expect(find.text('Event published.'), findsOneWidget);
+
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pumpAndSettle();
+    final search = find.descendant(
+      of: find.byType(SearchBar),
+      matching: find.byType(EditableText),
+    );
+    await tester.enterText(search, 'Publisher Work');
+    await tester.pumpAndSettle();
+    expect(find.text('Publisher Workshop'), findsOneWidget);
+  });
+
   group('main auth (restyled)', () {
     testWidgets('shows configuration guidance without credentials', (
       tester,
@@ -264,17 +716,105 @@ void main() {
 
       await tester.tap(find.text('Skip for now'));
       await tester.pumpAndSettle();
-      // Club picker (step 3): skip it too.
-      await tester.tap(find.textContaining('Skip').last);
+      await tester.enterText(find.byType(SearchBar), 'CSUS FYC');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('CSUS First-Year Council'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
       expect(backend.savedOnboarding, isNotNull);
       expect(backend.savedOnboarding!.year, 'U1');
       expect(backend.savedOnboarding!.isFroshie, isTrue);
       expect(backend.savedOnboarding!.interests, isEmpty);
+      expect(backend.follows, {'csus-first-year-council': null});
       // Back to the gate, which reloads the profile and opens the app.
       expect(find.text('gate'), findsOneWidget);
       expect(backend.profileRevision.value, 1);
+    });
+
+    testWidgets(
+      'persisted Following loads, preserves opt-ins and rolls back failed edits',
+      (tester) async {
+        final enabledAt = DateTime.utc(2026, 11, 20);
+        final backend = FakeBackend()
+          ..follows['csus-first-year-council'] = enabledAt;
+        await _pumpHome(tester, existingBackend: backend);
+
+        Future<void> tap(String label) async {
+          await tester.tap(find.text(label));
+          await tester.pumpAndSettle();
+        }
+
+        await tap('Profile');
+        await tap('1 Following');
+        expect(find.text('CSUS First-Year Council'), findsOneWidget);
+        await tap('Browse Clubs');
+        await tester.enterText(find.byType(SearchBar), 'robotics');
+        await tester.pumpAndSettle();
+        final row = find.widgetWithText(ListTile, 'McGill Robotics');
+        final follow = find.descendant(of: row, matching: find.text('Follow'));
+        backend.failFollowSave = true;
+        await tester.tap(follow);
+        await tester.pumpAndSettle();
+        expect(
+          find.text("Couldn't update Following. Try again."),
+          findsOneWidget,
+        );
+        expect(follow, findsOneWidget);
+        expect(backend.follows, {'csus-first-year-council': enabledAt});
+
+        backend.failFollowSave = false;
+        await tester.tap(follow);
+        await tester.pumpAndSettle();
+        expect(backend.follows['csus-first-year-council'], enabledAt);
+        expect(backend.follows, hasLength(2));
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _pumpHome(tester, existingBackend: backend);
+        await tap('Profile');
+        await tap('2 Following');
+        expect(find.text('McGill Robotics'), findsOneWidget);
+        expect(find.text('CSUS First-Year Council'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a followed faculty reloads its saved auto-RSVP preference', (
+      tester,
+    ) async {
+      final backend = FakeBackend()..follows['faculty-of-science'] = null;
+      await _pumpHome(tester, existingBackend: backend);
+
+      Future<void> tap(String label) async {
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+      }
+
+      final autoRsvp = find.widgetWithText(
+        SwitchListTile,
+        'Auto-RSVP to events',
+      );
+      await tap('Profile');
+      await tap('1 Following');
+      expect(find.text('Faculty of Science'), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(autoRsvp).value, isFalse);
+      backend.failFollowSave = true;
+      await tap('Auto-RSVP to events');
+      expect(tester.widget<SwitchListTile>(autoRsvp).value, isFalse);
+      expect(
+        find.text("Couldn't save your auto-RSVP preference. Try again."),
+        findsOneWidget,
+      );
+      backend.failFollowSave = false;
+      await tap('Auto-RSVP to events');
+      expect(backend.follows['faculty-of-science'], isNotNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pumpHome(tester, existingBackend: backend);
+      await tap('Profile');
+      await tap('1 Following');
+      expect(tester.widget<SwitchListTile>(autoRsvp).value, isTrue);
+      await tap('Auto-RSVP to events');
+      expect(backend.follows, {'faculty-of-science': null});
     });
 
     testWidgets('feed shows server events, not sample ones', (tester) async {
@@ -282,7 +822,11 @@ void main() {
       expect(find.text('Server Trivia Night'), findsOneWidget);
       expect(find.text('Board Game Night'), findsNothing);
       expect(find.text('Sample events'), findsNothing);
-      expect(find.text('AI SUMMARY'), findsOneWidget);
+      expect(
+        find.text('Teams of four, six rounds, prizes for the top three.'),
+        findsOneWidget,
+      );
+      expect(find.text('AI SUMMARY'), findsNothing);
     });
 
     testWidgets('RSVPs are saved and rolled back on failure', (tester) async {
